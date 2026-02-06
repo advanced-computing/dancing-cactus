@@ -1,0 +1,3 @@
+1. Introduction:
+We plan to study the relationship between energy price fluctuations and macroeconomic outcomes, with a particular focus on how short-term energy price shocks transmit into broader economic indicators such as inflation and industrial activity.
+More broadly, the project aims to explore how high-frequency energy market data can be used to understand economic volatility and policy-relevant dynamics in real time. Moreover, we also focus on the environmental externalities of energy consumption, analyzing its impact on indicators such as air quality.
