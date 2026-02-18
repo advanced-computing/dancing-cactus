@@ -2,4 +2,7 @@ pandas
 jupyter==1.*
 plotly
 streamlit
+xlrd
+openpyxl
+xlrd>=2.0.1
 altair==4.2.2

@@ -6,6 +6,12 @@ from datetime import date, timedelta
 st.markdown("# Main page 🎈")
 st.sidebar.markdown("# Main page 🎈")
 
+st.markdown("### Team")
+st.markdown("- Jocelyn Jiang\n- Eisuke Kobayashi")
+st.sidebar.markdown("### Team")
+st.sidebar.markdown("Jocelyn Jiang, Eisuke Kobayashi")
+
+
 ten_days_ago = date.today() - timedelta(days=10)
 
 selected_date = st.date_input(
