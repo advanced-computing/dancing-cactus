@@ -1,23 +1,31 @@
 import streamlit as st
 import pandas as pd
 from datetime import date, timedelta
+import requests
+import zipfile as zip
+import io
 
 # Main page content
 st.markdown("# Main page 🎈")
 st.sidebar.markdown("# Main page 🎈")
 
-ten_days_ago = date.today() - timedelta(days=10)
-
 selected_date = st.date_input(
-    label="select the date", max_value=date.today(), min_value=ten_days_ago
+    label="select the date", max_value=date.today() - timedelta(days=1)
 )
 
 st.title(f"Daily Wholesale Electricity Prices in NYC:{selected_date}")
 
+month = selected_date.strftime("%Y%m01")
 date = selected_date.strftime("%Y%m%d")
 
 # We use real-time market LBMP data
-data = pd.read_csv(f"https://mis.nyiso.com/public/csv/realtime/{date}realtime_zone.csv")
+# find a proper zip file
+url = f"https://mis.nyiso.com/public/csv/realtime/{month}realtime_zone_csv.zip"
+response = requests.get(url)
+
+with zip.ZipFile(io.BytesIO(response.content), "r") as z:
+    with z.open(f"{date}realtime_zone.csv") as f:
+        data = pd.read_csv(f)
 
 # We focus on NYC for now.
 data = data[data["Name"] == "N.Y.C."]
