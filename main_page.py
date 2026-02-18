@@ -2,6 +2,10 @@ import streamlit as st
 import pandas as pd
 from datetime import date, timedelta
 
+# Main page content
+st.markdown("# Main page 🎈")
+st.sidebar.markdown("# Main page 🎈")
+
 ten_days_ago = date.today() - timedelta(days=10)
 
 selected_date = st.date_input(
