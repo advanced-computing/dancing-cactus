@@ -3,9 +3,12 @@ import pandas as pd
 from datetime import date, timedelta
 
 ten_days_ago = date.today() - timedelta(days=10)
+
 selected_date = st.date_input(
     label="select the date", max_value=date.today(), min_value=ten_days_ago
 )
+
+st.title(f"Daily Wholesale Electricity Prices in NYC:{selected_date}")
 
 date = selected_date.strftime("%Y%m%d")
 
