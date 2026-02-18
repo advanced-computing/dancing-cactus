@@ -9,6 +9,12 @@ import io
 st.markdown("# Main page 🎈")
 st.sidebar.markdown("# Main page 🎈")
 
+st.markdown("### Team")
+st.markdown("- Jocelyn Jiang\n- Eisuke Kobayashi")
+st.sidebar.markdown("### Team")
+st.sidebar.markdown("Jocelyn Jiang, Eisuke Kobayashi")
+
+
 selected_date = st.date_input(
     label="select the date", max_value=date.today() - timedelta(days=1)
 )
