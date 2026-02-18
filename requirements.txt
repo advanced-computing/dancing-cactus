@@ -2,3 +2,4 @@ pandas
 jupyter==1.*
 plotly
 streamlit
+altair==4.2.2
