@@ -4,3 +4,5 @@ plotly
 streamlit
 xlrd
 openpyxl
+xlrd>=2.0.1
+
