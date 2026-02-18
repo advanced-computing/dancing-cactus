@@ -2,3 +2,5 @@ pandas
 jupyter==1.*
 plotly
 streamlit
+xlrd
+openpyxl
