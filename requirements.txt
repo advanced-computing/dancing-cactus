@@ -1,8 +1,9 @@
 pandas
 jupyter==1.*
 plotly
-streamlit
+streamlit>=1.40.0
 xlrd
 openpyxl
 xlrd>=2.0.1
-altair==4.2.2
+altair>=5.0.0
+requests
