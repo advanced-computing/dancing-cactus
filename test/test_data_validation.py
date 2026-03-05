@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
-import pytest
 
 from data_validation import (
     load_and_validate_pal,
