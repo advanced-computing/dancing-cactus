@@ -1,6 +1,6 @@
-from main_page import get_zip
-from main_page import get_csv
-from main_page import process_nyiso_data
+from proposal import get_zip
+from proposal import get_csv
+from proposal import process_nyiso_data
 from datetime import date
 import pandas as pd
 

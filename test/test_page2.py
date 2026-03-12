@@ -1,5 +1,5 @@
 import pandas as pd
-from page_2 import clean_gas_df
+from old.page_2 import clean_gas_df
 
 
 def test_clean_gas_df_none_returns_empty_with_columns():
