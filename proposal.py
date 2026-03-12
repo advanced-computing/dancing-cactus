@@ -1,9 +1,10 @@
 import streamlit as st
 
+
 def main() -> None:
     with st.expander("Initial Proposal (Original)"):
         st.markdown(
-        """
+            """
         ### 1. Introduction:
         We plan to study the relationship between energy price fluctuations and macroeconomic outcomes, with a particular focus on how short-term energy price shocks transmit into broader economic indicators such as inflation and industrial activity. More broadly, the project aims to explore how high-frequency energy market data can be used to understand economic volatility and policy-relevant dynamics in real time. Moreover, we also focus on the environmental externalities of energy consumption, analyzing its impact on indicators such as air quality.
         
@@ -42,8 +43,9 @@ def main() -> None:
         * Correlation versus causation: Observed associations may reflect correlation rather than causal effects, limiting the strength of policy conclusions.
         * Visualization constraints: Some relationships may be difficult to represent clearly through visualizations alone, especially when multiple confounding factors are present.
         * Interpretive limitations: Findings may be highly aggregated or context-specific, resulting in conclusions that are broad but offer limited actionable insight.
-        """)
-    
+        """
+        )
+
     st.header("Overview")
     st.markdown(
         """
@@ -52,8 +54,9 @@ def main() -> None:
         
         Futhermore, we also focus on the environmental externalities of energy consumption, 
         analyzing its impact on indicators such as air quality.
-        """)
-    
+        """
+    )
+
     st.subheader("Potential Research Question")
     st.markdown(
         """
@@ -64,8 +67,9 @@ def main() -> None:
         (If time allows)
         * What is the relationship between electricity consumption and air quality in the NY state? (We can analyze the relation between absolute electricity usage and air quality, or the proportion of green energy and air quality. At the same time, air quality has multiple aspects, 
         such as CO/PM2.5/NO2, which also brings us space for in-depth discussion)
-        """)
-    
+        """
+    )
+
     st.subheader("Data Source")
     st.markdown(
         """
@@ -74,8 +78,9 @@ def main() -> None:
         * Oil price: https://www.eia.gov/dnav/pet/pet_pri_spt_s1_d.htm
         * Natural gas price: https://www.eia.gov/dnav/ng/hist/rngwhhdD.htm
         * Air Quality https://www.epa.gov/outdoor-air-quality-data/download-daily-data
-        """)
-    
+        """
+    )
+
     st.subheader("Know/Unknown")
     st.markdown(
         """
@@ -86,8 +91,9 @@ def main() -> None:
         #### Unknow: 
         Despite these stylized facts, several important uncertainties remain.
         First, the magnitude and timing of the dynamic adjustment between demand shocks and LBMP are unclear. It is not obvious whether price responses are immediate, persistent, or asymmetric across peak and off-peak periods.
-        """)
-    
+        """
+    )
+
     st.subheader("Expected challenges")
     st.markdown(
         """
@@ -99,7 +105,8 @@ def main() -> None:
         
         3. Air Quality Attribution
         Air quality indicators such as PM2.5 or NO₂ are influenced by multiple emission sources beyond electricity generation (e.g., transportation, industrial activity). Isolating the contribution of electricity demand may therefore require additional controls or robustness checks.
-        """)
+        """
+    )
 
     st.subheader("Changes from the initial proposal")
     st.markdown(
@@ -113,7 +120,9 @@ def main() -> None:
         * Completely revised the initial proposal to reflect this new focus.
         * Refined the selection of required datasets.
         * Switched from monthly to daily datasets to allow for a more detailed analysis. 
-        """)
-    
+        """
+    )
+
+
 if __name__ == "__main__":
     main()
