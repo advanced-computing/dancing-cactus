@@ -10,3 +10,4 @@ requests
 pytest
 pytest-cov
 pandera
+google-cloud-bigquery==3.40.1
