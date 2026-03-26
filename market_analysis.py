@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import os
-from datetime import date
-from io import BytesIO
-from zipfile import ZipFile
+import datetime
 
 import pandas as pd
 import requests
 import streamlit as st
 
+import pandas_gbq
+from google.oauth2 import service_account
 
 # ------ Page config ------
 st.set_page_config(page_title="Energy Market Analysis", layout="wide")
@@ -20,6 +20,10 @@ NYISO_BASE_URL = (
 )
 
 EIA_HENRY_HUB_BASE_URL = "https://api.eia.gov/v2/natural-gas/pri/fut/data/"
+
+# ------ Credentials ------
+creds = st.secrets["gcp_service_account"]
+credentials = service_account.Credentials.from_service_account_info(creds)
 
 
 # ------ Utility helpers ------
@@ -63,50 +67,23 @@ def get_eia_api_key() -> str:
 
 # ------ API loaders -------
 @st.cache_data(ttl=3600)
-def load_nyiso_realtime_month(month: str) -> pd.DataFrame:
-    url = NYISO_BASE_URL.format(month=month)
+def load_nyiso_realtime(selected_month) -> any:
+    start_date = datetime.datetime.strptime(selected_month, "%Y-%m-%d")
 
-    response = requests.get(url, timeout=60)
-    response.raise_for_status()
+    if start_date.month == 12:
+        end_date = datetime.datetime(start_date.year + 1, 1, 1)
+    else:
+        end_date = datetime.datetime(start_date.year, start_date.month + 1, 1)
 
-    zip_bytes = BytesIO(response.content)
+    sql = f"""
+    SELECT Time_Stamp, Name, LBMP____MWHr_ 
+    FROM `sipa-adv-c-dancing-cactus.dataset.market_analysis` 
+    WHERE Time_Stamp >= '{start_date.strftime("%Y-%m-%d")}'
+    AND Time_Stamp < '{end_date.strftime("%Y-%m-%d")}'
+    """
+    df = pandas_gbq.read_gbq(sql, credentials=credentials)
 
-    frames = []
-    with ZipFile(zip_bytes) as zf:
-        csv_names = [name for name in zf.namelist() if name.endswith(".csv")]
-
-        if not csv_names:
-            raise ValueError("No CSV files found inside NYISO zip archive.")
-
-        for csv_name in csv_names:
-            with zf.open(csv_name) as f:
-                df = pd.read_csv(f)
-                frames.append(df)
-
-    if not frames:
-        raise ValueError("NYISO realtime zip did not contain readable data.")
-
-    combined = pd.concat(frames, ignore_index=True)
-    combined = normalize_columns(combined)
-
-    time_col = find_column(combined, ["Time Stamp", "Timestamp", "time_stamp", "time"])
-    zone_col = find_column(combined, ["Name", "Zone", "zone", "name"])
-    price_col = find_column(combined, ["LBMP ($/MWHr)", "LBMP", "lbmp"])
-
-    if time_col is None or zone_col is None or price_col is None:
-        raise ValueError(
-            "Could not identify NYISO columns. "
-            "Expected columns similar to Time Stamp, Name, and LBMP ($/MWHr)."
-        )
-
-    combined = combined[[time_col, zone_col, price_col]].copy()
-    combined.columns = ["timestamp", "zone", "lbmp"]
-
-    combined["timestamp"] = pd.to_datetime(combined["timestamp"], errors="coerce")
-    combined["lbmp"] = pd.to_numeric(combined["lbmp"], errors="coerce")
-    combined = combined.dropna(subset=["timestamp", "zone", "lbmp"]).copy()
-
-    return combined
+    return df
 
 
 @st.cache_data(ttl=3600)
@@ -115,7 +92,7 @@ def load_henry_hub_data(start_date: str = "1993-12-24") -> pd.DataFrame:
     Load Henry Hub natural gas prices from EIA API.
     """
     api_key = get_eia_api_key()
-    today_str = date.today().isoformat()
+    today_str = datetime.date.today().isoformat()
 
     params = {
         "api_key": api_key,
@@ -181,12 +158,12 @@ def load_henry_hub_data(start_date: str = "1993-12-24") -> pd.DataFrame:
 
 # ------ Metric functions -------
 def compute_electricity_metrics(df: pd.DataFrame) -> dict[str, str]:
-    avg_price = df["lbmp"].mean()
-    max_price = df["lbmp"].max()
-    min_price = df["lbmp"].min()
+    avg_price = df["LBMP____MWHr_"].mean()
+    max_price = df["LBMP____MWHr_"].max()
+    min_price = df["LBMP____MWHr_"].min()
 
-    peak_row = df.loc[df["lbmp"].idxmax()]
-    peak_hour = peak_row["timestamp"].strftime("%Y-%m-%d %H:%M")
+    peak_row = df.loc[df["LBMP____MWHr_"].idxmax()]
+    peak_hour = peak_row["Time_Stamp"].strftime("%Y-%m-%d %H:%M")
 
     return {
         "avg": f"{avg_price:.2f}",
@@ -213,15 +190,15 @@ def compute_gas_metrics(df: pd.DataFrame) -> dict[str, str]:
 
 
 # ------ Interpretation text ------
-def electricity_interpretation(df: pd.DataFrame, zone: str) -> str:
-    peak_row = df.loc[df["lbmp"].idxmax()]
-    low_row = df.loc[df["lbmp"].idxmin()]
+def electricity_interpretation(df: pd.DataFrame, Name: str) -> str:
+    peak_row = df.loc[df["LBMP____MWHr_"].idxmax()]
+    low_row = df.loc[df["LBMP____MWHr_"].idxmin()]
 
-    peak_time = peak_row["timestamp"].strftime("%Y-%m-%d %H:%M")
-    low_time = low_row["timestamp"].strftime("%Y-%m-%d %H:%M")
+    peak_time = peak_row["Time_Stamp"].strftime("%Y-%m-%d %H:%M")
+    low_time = low_row["Time_Stamp"].strftime("%Y-%m-%d %H:%M")
 
     return (
-        f"For the selected NYISO zone ({zone}), real-time electricity prices fluctuate substantially over the month. "
+        f"For the selected NYISO zone ({Name}), real-time electricity prices fluctuate substantially over the month. "
         f"The highest observed price occurs at {peak_time}, while the lowest occurs at {low_time}. "
         f"These movements suggest changing short-run market conditions, including demand pressure, supply availability, "
         f"and locational system constraints."
@@ -282,12 +259,12 @@ def render_electricity_section(realtime_df: pd.DataFrame) -> None:
         """
     )
 
-    zones = sorted(realtime_df["zone"].dropna().unique().tolist())
+    zones = sorted(realtime_df["Name"].dropna().unique().tolist())
     default_zone = "N.Y.C." if "N.Y.C." in zones else zones[0]
 
     zone = st.selectbox("Select a NYISO zone", zones, index=zones.index(default_zone))
-    zone_df = realtime_df.loc[realtime_df["zone"] == zone].copy()
-    zone_df = zone_df.sort_values("timestamp")
+    zone_df = realtime_df.loc[realtime_df["Name"] == zone].copy()
+    zone_df = zone_df.sort_values("Time_Stamp")
 
     if zone_df.empty:
         st.warning("No electricity data available for the selected zone.")
@@ -301,7 +278,7 @@ def render_electricity_section(realtime_df: pd.DataFrame) -> None:
     c3.metric("Minimum LBMP", metrics["min"])
     c4.metric("Peak Timestamp", metrics["peak_hour"])
 
-    chart_df = zone_df.set_index("timestamp")[["lbmp"]]
+    chart_df = zone_df.set_index("Time_Stamp")[["LBMP____MWHr_"]]
     st.line_chart(chart_df, use_container_width=True)
 
     st.caption("LBMP is measured in dollars per megawatt-hour.")
@@ -415,11 +392,23 @@ def main() -> None:
         value="202602",
         help="Example: 202602 for February 2026",
     )
+    try:
+        nyiso_month_datetime = datetime.datetime.strptime(nyiso_month, "%Y%m")
+
+        if nyiso_month_datetime < datetime.datetime(2017, 1, 1):
+            st.error("No data available. Please fill months after 2017")
+            st.stop()
+
+        selected_month = nyiso_month_datetime.strftime("%Y-%m-%d")
+
+    except ValueError:
+        st.error("Invalid form. Please write in YYYYMM")
+        st.stop()
 
     render_intro()
 
     try:
-        realtime_df = load_nyiso_realtime_month(nyiso_month)
+        realtime_df = load_nyiso_realtime(selected_month)
     except Exception as exc:
         st.error(
             f"Failed to load NYISO electricity data from online public source: {exc}"
