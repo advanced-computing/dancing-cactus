@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import os
 import datetime
 
 import pandas as pd
-import requests
 import streamlit as st
 
 import pandas_gbq
 from google.oauth2 import service_account
+
+from bigquery_utils import load_henry_hub_from_bigquery
 
 # ------ Page config ------
 st.set_page_config(page_title="Energy Market Analysis", layout="wide")
@@ -19,50 +19,10 @@ NYISO_BASE_URL = (
     "https://mis.nyiso.com/public/csv/realtime/{month}01realtime_zone_csv.zip"
 )
 
-EIA_HENRY_HUB_BASE_URL = "https://api.eia.gov/v2/natural-gas/pri/fut/data/"
 
 # ------ Credentials ------
 creds = st.secrets["gcp_service_account"]
 credentials = service_account.Credentials.from_service_account_info(creds)
-
-
-# ------ Utility helpers ------
-def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    df.columns = [str(col).strip() for col in df.columns]
-    return df
-
-
-def find_column(df: pd.DataFrame, candidates: list[str]) -> str | None:
-    lower_map = {col.lower(): col for col in df.columns}
-    for candidate in candidates:
-        if candidate.lower() in lower_map:
-            return lower_map[candidate.lower()]
-    return None
-
-
-def get_eia_api_key() -> str:
-    """
-    Try Streamlit secrets first, then environment variable.
-    """
-    # 1) Streamlit secrets
-    try:
-        if "EIA_API_KEY" in st.secrets:
-            key = str(st.secrets["EIA_API_KEY"]).strip()
-            if key:
-                return key
-    except Exception:
-        pass
-
-    # 2) Environment variable
-    key = os.getenv("EIA_API_KEY", "").strip()
-    if key:
-        return key
-
-    raise ValueError(
-        "Missing EIA_API_KEY. Please set it in .streamlit/secrets.toml "
-        "or export it in the same terminal session before running Streamlit."
-    )
 
 
 # ------ API loaders -------
@@ -87,71 +47,20 @@ def load_nyiso_realtime(selected_month) -> any:
 
 
 @st.cache_data(ttl=3600)
-def load_henry_hub_data(start_date: str = "1993-12-24") -> pd.DataFrame:
-    """
-    Load Henry Hub natural gas prices from EIA API.
-    """
-    api_key = get_eia_api_key()
-    today_str = datetime.date.today().isoformat()
-
-    params = {
-        "api_key": api_key,
-        "frequency": "daily",
-        "data[0]": "value",
-        "start": start_date,
-        "end": today_str,
-        "sort[0][column]": "period",
-        "sort[0][direction]": "desc",
-        "offset": 0,
-        "length": 5000,
-    }
-
-    response = requests.get(EIA_HENRY_HUB_BASE_URL, params=params, timeout=60)
-    response.raise_for_status()
-
-    payload = response.json()
-
-    if "response" not in payload or "data" not in payload["response"]:
-        raise ValueError(f"Unexpected EIA API response format: {payload}")
-
-    records = payload["response"]["data"]
-    if not records:
-        raise ValueError("EIA API returned no Henry Hub records.")
-
-    df = pd.DataFrame(records)
-    df = normalize_columns(df)
-
-    period_col = find_column(df, ["period"])
-    value_col = find_column(df, ["value"])
-    series_col = find_column(
-        df, ["series-description", "seriesDescription", "series description"]
-    )
-
-    if period_col is None or value_col is None:
-        raise ValueError(
-            f"Could not identify 'period' and 'value' columns in EIA response. "
-            f"Columns found: {list(df.columns)}"
-        )
-
-    keep_cols = [period_col, value_col]
-    if series_col:
-        keep_cols.append(series_col)
-
-    df = df[keep_cols].copy()
-
-    rename_map = {
-        period_col: "date",
-        value_col: "price",
-    }
-    if series_col:
-        rename_map[series_col] = "series_description"
-
-    df = df.rename(columns=rename_map)
-
+def load_henry_hub_data() -> pd.DataFrame:
+    df = load_henry_hub_from_bigquery().copy()
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
     df["price"] = pd.to_numeric(df["price"], errors="coerce")
-    df = df.dropna(subset=["date", "price"]).copy()
-    df = df.sort_values("date")
+    df = df.dropna(subset=["date", "price"]).sort_values("date")
+
+    if "series_description" in df.columns:
+        df = df[
+            df["series_description"].str.contains(
+                "Henry Hub Natural Gas Spot Price",
+                case=False,
+                na=False,
+            )
+        ].copy()
 
     return df
 
@@ -227,12 +136,12 @@ def render_sidebar() -> None:
         """
         **This page combines**
         - NYISO real-time electricity prices
-        - EIA Henry Hub natural gas prices
+        - Henry Hub natural gas prices
         - exploratory market interpretation
 
         **Data source logic**
         - electricity: online NYISO public data
-        - gas: online EIA API
+        - gas: Henry Hub data stored in BigQuery
         """
     )
 
@@ -242,7 +151,7 @@ def render_intro() -> None:
     st.write(
         """
         This page combines two related parts of our project: NYISO real-time electricity prices and
-        Henry Hub natural gas prices from the EIA API. The goal is to present a more coherent energy-market
+        Henry Hub natural gas prices stored in BigQuery. The goal is to present a more coherent energy-market
         view by showing both local electricity price outcomes and broader benchmark fuel-market conditions.
         """
     )
@@ -297,7 +206,7 @@ def render_gas_section(gas_df: pd.DataFrame) -> None:
 
     st.write(
         """
-        This section uses Henry Hub daily prices from the EIA API. Henry Hub is treated here as a benchmark
+        This section uses Henry Hub daily prices loaded from BigQuery. Henry Hub is treated here as a benchmark
         U.S. natural gas series, which provides fuel-market context for interpreting electricity price movements.
         """
     )
@@ -337,7 +246,7 @@ def render_gas_section(gas_df: pd.DataFrame) -> None:
     st.line_chart(chart_df, use_container_width=True)
 
     st.caption(
-        "Henry Hub price is a benchmark U.S. natural gas series from the EIA API."
+        "Henry Hub price is a benchmark U.S. natural gas series loaded from BigQuery."
     )
 
     st.write("**Interpretation**")
@@ -352,7 +261,7 @@ def render_gas_section(gas_df: pd.DataFrame) -> None:
 def render_gas_unavailable(exc: Exception) -> None:
     st.header("Natural Gas Benchmark Context")
     st.warning(
-        "Henry Hub gas data could not be loaded in the current runtime environment. "
+        "Henry Hub gas data could not be loaded from BigQuery in the current runtime environment. "
         "Electricity content is still available below the intro section."
     )
     st.code(str(exc))
@@ -376,8 +285,8 @@ def render_comparison_section(gas_available: bool) -> None:
         st.write(
             """
             NYISO real-time prices capture local power-market outcomes. Henry Hub is intended to provide broader
-            benchmark fuel-market context, but it is unavailable in the current runtime because the EIA API key
-            was not detected or the API request failed.
+            benchmark fuel-market context, but it is unavailable in the current runtime because the BigQuery query
+            failed or credentials were not configured correctly.
             """
         )
 
