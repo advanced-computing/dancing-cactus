@@ -19,50 +19,10 @@ NYISO_BASE_URL = (
     "https://mis.nyiso.com/public/csv/realtime/{month}01realtime_zone_csv.zip"
 )
 
-EIA_HENRY_HUB_BASE_URL = "https://api.eia.gov/v2/natural-gas/pri/fut/data/"
 
 # ------ Credentials ------
 creds = st.secrets["gcp_service_account"]
 credentials = service_account.Credentials.from_service_account_info(creds)
-
-
-# ------ Utility helpers ------
-def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    df.columns = [str(col).strip() for col in df.columns]
-    return df
-
-
-def find_column(df: pd.DataFrame, candidates: list[str]) -> str | None:
-    lower_map = {col.lower(): col for col in df.columns}
-    for candidate in candidates:
-        if candidate.lower() in lower_map:
-            return lower_map[candidate.lower()]
-    return None
-
-
-def get_eia_api_key() -> str:
-    """
-    Try Streamlit secrets first, then environment variable.
-    """
-    # 1) Streamlit secrets
-    try:
-        if "EIA_API_KEY" in st.secrets:
-            key = str(st.secrets["EIA_API_KEY"]).strip()
-            if key:
-                return key
-    except Exception:
-        pass
-
-    # 2) Environment variable
-    key = os.getenv("EIA_API_KEY", "").strip()
-    if key:
-        return key
-
-    raise ValueError(
-        "Missing EIA_API_KEY. Please set it in .streamlit/secrets.toml "
-        "or export it in the same terminal session before running Streamlit."
-    )
 
 
 # ------ API loaders -------
@@ -176,7 +136,7 @@ def render_sidebar() -> None:
         """
         **This page combines**
         - NYISO real-time electricity prices
-        - EIA Henry Hub natural gas prices
+        - Henry Hub natural gas prices
         - exploratory market interpretation
 
         **Data source logic**
