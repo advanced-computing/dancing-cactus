@@ -10,3 +10,7 @@ requests
 pytest
 pytest-cov
 pandera
+pandas-gbq
+google-cloud-bigquery
+pyarrow
+db-dtypes
