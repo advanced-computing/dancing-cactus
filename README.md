@@ -48,3 +48,16 @@ Weather conditions (temperature, precipitation, solar radiation) simultaneously 
 
 Air quality indicators such as PM2.5 or NO₂ are influenced by multiple emission sources beyond electricity generation (e.g., transportation, industrial activity). Isolating the contribution of electricity demand may therefore require additional controls or robustness checks.
 
+
+# Setup Instruction
+1. Fetch NYS electricity wholesale price and natural gas data through API from the website.
+(electricity data:NY state Energy Market & Operational Data 
+natural gas data:EIA(US energy information admistration))
+
+2. Store data in the Big Query
+
+3. Fetch corresponding data in response to users' input
+
+4. data visualization
+
+5. deploy app
