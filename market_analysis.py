@@ -28,6 +28,7 @@ credentials = service_account.Credentials.from_service_account_info(creds)
 # ------ API loaders -------
 @st.cache_data(ttl=3600)
 def load_nyiso_realtime(selected_month) -> any:
+
     start_date = datetime.datetime.strptime(selected_month, "%Y-%m-%d")
 
     if start_date.month == 12:
@@ -42,7 +43,6 @@ def load_nyiso_realtime(selected_month) -> any:
     AND Time_Stamp < '{end_date.strftime("%Y-%m-%d")}'
     """
     df = pandas_gbq.read_gbq(sql, credentials=credentials)
-
     return df
 
 
@@ -158,7 +158,7 @@ def render_intro() -> None:
     st.divider()
 
 
-def render_electricity_section(realtime_df: pd.DataFrame) -> None:
+def render_electricity_section() -> None:
     st.header("Electricity Market Overview")
 
     st.write(
@@ -168,9 +168,27 @@ def render_electricity_section(realtime_df: pd.DataFrame) -> None:
         """
     )
 
+    # input month
+    year = st.selectbox("Year", range(2017, 2027), index=9)
+    month = st.selectbox("Month", range(1, 13))
+    selected_month = datetime.date(year, month, 1)
+    selected_month_str = selected_month.strftime("%Y-%m-%d")
+
+    if selected_month > datetime.date.today():
+        st.error("No data available.")
+        st.stop()
+
+    try:
+        realtime_df = load_nyiso_realtime(selected_month_str)
+    except Exception as exc:
+        st.error(
+            f"Failed to load NYISO electricity data from online public source: {exc}"
+        )
+        return
+
+    # input zones
     zones = sorted(realtime_df["Name"].dropna().unique().tolist())
     default_zone = "N.Y.C." if "N.Y.C." in zones else zones[0]
-
     zone = st.selectbox("Select a NYISO zone", zones, index=zones.index(default_zone))
     zone_df = realtime_df.loc[realtime_df["Name"] == zone].copy()
     zone_df = zone_df.sort_values("Time_Stamp")
@@ -294,38 +312,8 @@ def render_comparison_section(gas_available: bool) -> None:
 # ------ Main ------
 def main() -> None:
     render_sidebar()
-
-    st.sidebar.subheader("Electricity Data Controls")
-    nyiso_month = st.sidebar.text_input(
-        "NYISO month (YYYYMM)",
-        value="202602",
-        help="Example: 202602 for February 2026",
-    )
-    try:
-        nyiso_month_datetime = datetime.datetime.strptime(nyiso_month, "%Y%m")
-
-        if nyiso_month_datetime < datetime.datetime(2017, 1, 1):
-            st.error("No data available. Please fill months after 2017")
-            st.stop()
-
-        selected_month = nyiso_month_datetime.strftime("%Y-%m-%d")
-
-    except ValueError:
-        st.error("Invalid form. Please write in YYYYMM")
-        st.stop()
-
     render_intro()
-
-    try:
-        realtime_df = load_nyiso_realtime(selected_month)
-    except Exception as exc:
-        st.error(
-            f"Failed to load NYISO electricity data from online public source: {exc}"
-        )
-        return
-
-    # Electricity always renders if available
-    render_electricity_section(realtime_df)
+    render_electricity_section()
 
     gas_available = False
     try:
