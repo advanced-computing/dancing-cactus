@@ -1,11 +1,11 @@
 name: Update LBMP Price Data
 
 on:
-  schedule:
-    # daily
-    - cron: "0 0 * * *"
-  # support manual trigger
-  workflow_dispatch:
+    push:
+        branches:
+            - auto-update-test
+    
+    workflow_dispatch:
 
 jobs:
   update_data:
