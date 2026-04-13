@@ -4,7 +4,6 @@ on:
   schedule:
     # daily
     - cron: "0 0 * * *"
-      timezone: "America/New_York"
   # support manual trigger
   workflow_dispatch:
 
