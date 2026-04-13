@@ -1,0 +1,32 @@
+name: Update LBMP Price Data
+
+on:
+  schedule:
+    # daily
+    - cron: "0 0 * * *"
+      timezone: "America/New_York"
+  # support manual trigger
+  workflow_dispatch:
+
+jobs:
+  update_data:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Check directory structure
+        run: |
+          echo "Current directory: $(pwd)"
+          echo "Contents of current directory:"
+          ls -la
+          echo "Contents of repository root:"
+          find . -type f -name "*.py" | sort
+      - name: Update data
+        env:
+          LBMP_data: ${{ secrets.LBMP_DATA }}
+        run: python ${{ github.workspace }}/data_load/LBMP_data_loader_update.py
