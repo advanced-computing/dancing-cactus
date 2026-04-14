@@ -19,7 +19,7 @@ jobs:
       - name: Create Streamlit secrets file
         run: |
           mkdir -p .streamlit
-          echo 'gcp_service_account = ${{ secrets.LBMP_DATA }}' > .streamlit/secrets.toml
+          echo "gcp_service_account = '${{ secrets.LBMP_DATA }}'" > .streamlit/secrets.toml
       - name: Run tests
         # https://pytest-cov.readthedocs.io/en/latest/readme.html
         run: python -m pytest --cov
