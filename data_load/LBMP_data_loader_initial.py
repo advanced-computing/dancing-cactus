@@ -1,13 +1,10 @@
-import json
-import os
-
 import requests
 from io import BytesIO
 from zipfile import ZipFile
 
 import pandas as pd
 import pandas_gbq
-from google.oauth2 import service_account
+import pydata_google_auth
 
 from datetime import date
 
@@ -18,10 +15,9 @@ def authenticatation() -> any:
         "https://www.googleapis.com/auth/drive",
     ]
 
-    bq_credentials = os.environ["LBMP_DATA"]
-    bq_credentials = json.loads(bq_credentials)
-    credentials = service_account.Credentials.from_service_account_info(
-        bq_credentials, scopes=SCOPES
+    credentials = pydata_google_auth.get_user_credentials(
+        SCOPES,
+        auth_local_webserver=True,
     )
     return credentials
 
@@ -62,7 +58,7 @@ def clean_colum_name(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def create_dataset(df: pd.DataFrame, credentials: any, mode: str) -> None:
-    table_id = "dataset.market_analysis"
+    table_id = "dataset2.market_analysis"
     project_id = "sipa-adv-c-dancing-cactus"
 
     df = pandas_gbq.to_gbq(
