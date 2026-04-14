@@ -4,6 +4,7 @@ import datetime
 
 import pandas as pd
 import streamlit as st
+import altair as alt
 
 import pandas_gbq
 from google.oauth2 import service_account
@@ -66,20 +67,39 @@ def load_henry_hub_data() -> pd.DataFrame:
 
 
 # ------ Metric functions -------
-def compute_electricity_metrics(df: pd.DataFrame) -> dict[str, str]:
-    avg_price = df["LBMP____MWHr_"].mean()
-    max_price = df["LBMP____MWHr_"].max()
-    min_price = df["LBMP____MWHr_"].min()
+def get_processed_electricity_data(df: pd.DataFrame, zone: str) -> pd.DataFrame:
+    daily_df = (
+        df.groupby("Name")
+        .resample("D", on="Time_Stamp")["LBMP____MWHr_"]
+        .agg(["mean", "max", "min"])
+        .reset_index()
+    )
 
-    peak_row = df.loc[df["LBMP____MWHr_"].idxmax()]
-    peak_hour = peak_row["Time_Stamp"].strftime("%Y-%m-%d %H:%M")
+    zone_df = daily_df.loc[daily_df["Name"] == zone].copy()
+    zone_df = zone_df.sort_values("Time_Stamp")
+    return zone_df
 
-    return {
-        "avg": f"{avg_price:.2f}",
-        "max": f"{max_price:.2f}",
-        "min": f"{min_price:.2f}",
-        "peak_hour": peak_hour,
-    }
+
+def create_comparison_graph(electricity_df: pd.DataFrame, gas_df: pd.DataFrame) -> None:
+    base = alt.Chart(electricity_df).encode(alt.X("Time_Stamp").axis(title="Date"))
+
+    area = base.mark_area(opacity=0.3, color="lightblue").encode(
+        alt.Y("max").axis(title="LBMP($/MWh)", titleColor="blue"),
+        alt.Y2("min"),
+    )
+    line_electricity = base.mark_line(color="blue").encode(
+        alt.Y("mean").axis(title="LBMP($/MWh)", titleColor="blue"),
+    )
+    electricity_chart = alt.layer(area, line_electricity)
+    line_gas = (
+        alt.Chart(gas_df)
+        .mark_line(color="red")
+        .encode(
+            alt.X("date"),
+            alt.Y("price").axis(title="Natural Gas Price", titleColor="red"),
+        )
+    )
+    return alt.layer(electricity_chart, line_gas).resolve_scale(y="independent")
 
 
 def compute_gas_metrics(df: pd.DataFrame) -> dict[str, str]:
@@ -99,21 +119,6 @@ def compute_gas_metrics(df: pd.DataFrame) -> dict[str, str]:
 
 
 # ------ Interpretation text ------
-def electricity_interpretation(df: pd.DataFrame, Name: str) -> str:
-    peak_row = df.loc[df["LBMP____MWHr_"].idxmax()]
-    low_row = df.loc[df["LBMP____MWHr_"].idxmin()]
-
-    peak_time = peak_row["Time_Stamp"].strftime("%Y-%m-%d %H:%M")
-    low_time = low_row["Time_Stamp"].strftime("%Y-%m-%d %H:%M")
-
-    return (
-        f"For the selected NYISO zone ({Name}), real-time electricity prices fluctuate substantially over the month. "
-        f"The highest observed price occurs at {peak_time}, while the lowest occurs at {low_time}. "
-        f"These movements suggest changing short-run market conditions, including demand pressure, supply availability, "
-        f"and locational system constraints."
-    )
-
-
 def gas_interpretation(df: pd.DataFrame) -> str:
     peak_row = df.loc[df["price"].idxmax()]
     low_row = df.loc[df["price"].idxmin()]
@@ -126,6 +131,14 @@ def gas_interpretation(df: pd.DataFrame) -> str:
         f"In this sample, the highest observed benchmark gas price occurs on {peak_date}, "
         f"while the lowest occurs on {low_date}. Henry Hub is used here as a national benchmark "
         f"to provide broader fuel-market context rather than a New York-specific local gas price."
+    )
+
+
+def graph_legend() -> str:
+    return (
+        "In the comparison graph, the blue line represents the average daily LBMP for the selected NYISO zone, "
+        "while the shaded area shows the range between daily minimum and maximum LBMP. The red line represents "
+        "the Henry Hub natural gas price for the same period. The two y-axes are independent to allow for clearer visualization of both series."
     )
 
 
@@ -159,16 +172,16 @@ def render_intro() -> None:
 
 
 def render_electricity_section() -> None:
-    st.header("Electricity Market Overview")
+    st.header("The Comparison of Electricity and Gas Markets")
 
     st.write(
         """
-        This section explores hourly NYISO real-time electricity prices. Select a zone to examine
+        This section explores the relationship between NYISO real-time electricity prices and Henry Hub natural gas prices. Select a zone to examine
         how locational marginal prices vary over the available monthly sample.
         """
     )
 
-    # input month
+    # input month and zone
     year = st.selectbox("Year", range(2017, 2027), index=9)
     month = st.selectbox("Month", range(1, 13))
     selected_month = datetime.date(year, month, 1)
@@ -180,38 +193,55 @@ def render_electricity_section() -> None:
 
     try:
         realtime_df = load_nyiso_realtime(selected_month_str)
+
+        ZONE_MAP = {
+            "WEST": "A - West (Buffalo/Niagara)",
+            "GENESE": "B - Genesee (Rochester)",
+            "CENTRL": "C - Central (Syracuse)",
+            "NORTH": "D - North (St. Lawrence)",
+            "MHK VL": "E - Mohawk Valley",
+            "CAPITL": "F - Capital (Albany)",
+            "HUD VL": "G - Hudson Valley",
+            "MILLWD": "H - Millwood",
+            "DUNWOD": "I - Dunwoodie",
+            "N.Y.C.": "J - New York City",
+            "LONGIL": "K - Long Island",
+        }
+
+        selected_zone = st.selectbox(
+            "Select a NYISO zone",
+            options=list(ZONE_MAP.keys()),
+            format_func=lambda x: ZONE_MAP.get(x),
+            index=list(ZONE_MAP.keys()).index("N.Y.C."),
+        )
+
+        zone_df = get_processed_electricity_data(realtime_df, selected_zone)
+
+        gas_df = load_henry_hub_data()
+        filtered = gas_df[
+            (gas_df["date"].dt.year == year) & (gas_df["date"].dt.month == month)
+        ]
+
+        chart = create_comparison_graph(zone_df, filtered)
+        st.altair_chart(chart, use_container_width=True)
+
     except Exception as exc:
         st.error(
             f"Failed to load NYISO electricity data from online public source: {exc}"
         )
         return
 
-    # input zones
-    zones = sorted(realtime_df["Name"].dropna().unique().tolist())
-    default_zone = "N.Y.C." if "N.Y.C." in zones else zones[0]
-    zone = st.selectbox("Select a NYISO zone", zones, index=zones.index(default_zone))
-    zone_df = realtime_df.loc[realtime_df["Name"] == zone].copy()
-    zone_df = zone_df.sort_values("Time_Stamp")
-
     if zone_df.empty:
         st.warning("No electricity data available for the selected zone.")
         return
 
-    metrics = compute_electricity_metrics(zone_df)
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Peak LBMP", f"${zone_df['max'].max():.2f}")
+    with col2:
+        st.metric("Avg LBMP", f"${zone_df['mean'].mean():.2f}")
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Average LBMP", metrics["avg"])
-    c2.metric("Maximum LBMP", metrics["max"])
-    c3.metric("Minimum LBMP", metrics["min"])
-    c4.metric("Peak Timestamp", metrics["peak_hour"])
-
-    chart_df = zone_df.set_index("Time_Stamp")[["LBMP____MWHr_"]]
-    st.line_chart(chart_df, use_container_width=True)
-
-    st.caption("LBMP is measured in dollars per megawatt-hour.")
-
-    st.write("**Interpretation**")
-    st.write(electricity_interpretation(zone_df, zone))
+    st.caption(graph_legend())
 
     with st.expander("Preview processed electricity data"):
         st.dataframe(zone_df.head(30), use_container_width=True)
