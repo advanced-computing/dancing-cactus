@@ -23,7 +23,7 @@ def authenticatation() -> any:
         "https://www.googleapis.com/auth/drive",
     ]
 
-    bq_credentials = os.environ["LBMP_DATA"]
+    bq_credentials = os.environ["LBMP_data"]
     bq_credentials = json.loads(bq_credentials)
     credentials = service_account.Credentials.from_service_account_info(
         bq_credentials, scopes=SCOPES
