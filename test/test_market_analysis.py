@@ -1,20 +1,14 @@
 import pandas as pd
 
 from google.cloud import bigquery
-import pydata_google_auth
+import streamlit as st
+from google.oauth2 import service_account
 
 from market_analysis import load_nyiso_realtime
 from market_analysis import get_processed_electricity_data
 
-SCOPES = [
-    "https://www.googleapis.com/auth/cloud-platform",
-    "https://www.googleapis.com/auth/drive",
-]
-
-credentials = pydata_google_auth.get_user_credentials(
-    SCOPES,
-    auth_local_webserver=True,
-)
+creds_info = st.secrets["gcp_service_account"]
+credentials = service_account.Credentials.from_service_account_info(creds_info)
 
 table_id = "dataset.market_analysis"
 project_id = "sipa-adv-c-dancing-cactus"
