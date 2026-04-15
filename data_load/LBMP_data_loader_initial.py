@@ -58,7 +58,7 @@ def clean_colum_name(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def create_dataset(df: pd.DataFrame, credentials: any, mode: str) -> None:
-    table_id = "dataset.market_analysis"
+    table_id = "dataset2.market_analysis"
     project_id = "sipa-adv-c-dancing-cactus"
 
     df = pandas_gbq.to_gbq(
