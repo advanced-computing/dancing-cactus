@@ -25,5 +25,5 @@ jobs:
           find . -type f -name "*.py" | sort
       - name: Update data
         env:
-          LBMP_data: ${{ secrets.LBMP_DATA }}
+          LBMP_DATA: ${{ secrets.LBMP_DATA }}
         run: python ${{ github.workspace }}/data_load/LBMP_data_loader_update.py
