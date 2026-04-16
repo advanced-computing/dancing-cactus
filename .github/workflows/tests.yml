@@ -16,6 +16,12 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: pip install -r requirements.txt
+      - name: Create Streamlit secrets file
+        run: |
+          mkdir -p .streamlit
+          cat << 'EOF' > .streamlit/secrets.toml
+          ${{ secrets.LBMP_DATA }}
+          EOF
       - name: Run tests
         # https://pytest-cov.readthedocs.io/en/latest/readme.html
         run: python -m pytest --cov

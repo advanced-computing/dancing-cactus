@@ -1,82 +1,92 @@
-# from market_analysis import load_nyiso_realtime
-# from market_analysis import load_henry_hub_data
-# from market_analysis import compute_electricity_metrics
-# from market_analysis import electricity_interpretation
-# from market_analysis import gas_interpretation
+import pandas as pd
 
-# import pandas as pd
-# import pydata_google_auth
-# from google.cloud import bigquery
+from google.cloud import bigquery
+import streamlit as st
+from google.oauth2 import service_account
 
-# SCOPES = [
-#     "https://www.googleapis.com/auth/cloud-platform",
-#     "https://www.googleapis.com/auth/drive",
-# ]
+from market_analysis import load_nyiso_realtime
+from market_analysis import get_processed_electricity_data
 
-# credentials = pydata_google_auth.get_user_credentials(
-#     SCOPES,
-#     auth_local_webserver=True,
-# )
-# client = bigquery.Client(credentials=credentials, project="sipa-adv-c-dancing-cactus")
+creds_info = st.secrets["gcp_service_account"]
+credentials = service_account.Credentials.from_service_account_info(creds_info)
+
+table_id = "dataset.market_analysis"
+project_id = "sipa-adv-c-dancing-cactus"
+
+client = bigquery.Client(credentials=credentials, project=project_id)
 
 
-# def test_load_nyiso_realtime():
-#     test_month_1 = "2025-12-01"
+def test_load_nyiso_realtime():
+    selected_month_1 = "2025-12-01"
 
-#     query = """
-#     SELECT Time_Stamp, Name, LBMP____MWHr_
-#     FROM `sipa-adv-c-dancing-cactus.dataset.market_analysis`
-#     WHERE  Time_Stamp >= "2025-12-01"
-#     AND Time_Stamp < "2026-01-01"
-#     """
-#     client_job = client.query(query)
-#     df_1 = client_job.to_dataframe()
+    sql_1 = """
+    SELECT Time_Stamp, Name, LBMP____MWHr_ 
+    FROM `sipa-adv-c-dancing-cactus.dataset.market_analysis` 
+    WHERE Time_Stamp >= '2025-12-01'
+    AND Time_Stamp < '2026-01-01'
+    """
+    client_job = client.query(sql_1)
+    expected_df_1 = client_job.to_dataframe()
 
-#     pd.testing.assert_frame_equal(load_nyiso_realtime(test_month_1), df_1)
+    selected_month_1_actual = (
+        load_nyiso_realtime(selected_month_1)
+        .sort_values(by=["Time_Stamp", "Name"])
+        .reset_index(drop=True)
+    )
+    expected_df_1_actual = expected_df_1.sort_values(
+        by=["Time_Stamp", "Name"]
+    ).reset_index(drop=True)
 
-#     test_month_2 = "2025-04-01"
-#     query = """
-#     SELECT Time_Stamp, Name, LBMP____MWHr_
-#     FROM `sipa-adv-c-dancing-cactus.dataset.market_analysis`
-#     WHERE  Time_Stamp >= "2025-04-01"
-#     AND Time_Stamp < "2025-05-01"
-#     """
-#     client_job = client.query(query)
-#     df_2 = client_job.to_dataframe()
+    pd.testing.assert_frame_equal(selected_month_1_actual, expected_df_1_actual)
 
-#     pd.testing.assert_frame_equal(load_nyiso_realtime(test_month_2), df_2)
+    selected_month_2 = "2024-05-01"
 
+    sql_2 = """
+    SELECT Time_Stamp, Name, LBMP____MWHr_ 
+    FROM `sipa-adv-c-dancing-cactus.dataset.market_analysis` 
+    WHERE Time_Stamp >= '2024-05-01'
+    AND Time_Stamp < '2024-06-01'
+    """
 
-# def test_load_henry_hub_data():
-#     test_date_1 = date(2025, 12, 30)
-#     expected_1 = "20251230realtime_zone.csv"
-#     assert get_csv(test_date_1) == expected_1
+    client_job = client.query(sql_2)
+    expected_df_2 = client_job.to_dataframe()
 
-#     test_date_2 = date(2025, 12, 1)
-#     expected_2 = "20251201realtime_zone.csv"
-#     assert get_csv(test_date_2) == expected_2
+    selected_month_2_actual = (
+        load_nyiso_realtime(selected_month_2)
+        .sort_values(by=["Time_Stamp", "Name"])
+        .reset_index(drop=True)
+    )
+    expected_df_2_actual = expected_df_2.sort_values(
+        by=["Time_Stamp", "Name"]
+    ).reset_index(drop=True)
 
-
-# def test_compute_electricity_metrics():
-#     dummy_data = pd.DataFrame(
-#         {
-#             "Time_Stamp": pd.to_datetime(
-#                 [
-#                     "2026-02-01 12:00:00",
-#                     "2026-02-02 03:00:00",
-#                     "2026-02-05 20:00:00",
-#                 ]
-#             ),
-#             "LBMP____MWHr_": [30.5, 40.2, 35.0],
-#         }
-#     )
-#     result = compute_electricity_metrics(dummy_data)
-
-#     assert result["avg"] == "35.23"
-#     assert result["max"] == "40.20"
-#     assert result["min"] == "30.50"
-#     assert result["peak_hour"] == "2026-02-02 03:00"
+    pd.testing.assert_frame_equal(selected_month_2_actual, expected_df_2_actual)
 
 
-def test_dummy():
-    assert True
+def test_get_processed_electricity_data():
+    test_data = pd.DataFrame(
+        {
+            "Time_Stamp": pd.to_datetime(
+                ["2026-01-01 00:00", "2026-01-01 12:00", "2026-01-02 00:00"]
+            ),
+            "Name": ["Zone A", "Zone A", "Zone A"],
+            "LBMP____MWHr_": [10.0, 20.0, 30.0],
+        }
+    )
+    result = get_processed_electricity_data(test_data, "Zone A")
+
+    assert (
+        result[result["Time_Stamp"] == pd.to_datetime("2026-01-01")]["mean"].iloc[0]
+        == 15.0
+    )
+    assert (
+        result[result["Time_Stamp"] == pd.to_datetime("2026-01-02")]["mean"].iloc[0]
+        == 30.0
+    )
+    assert (
+        result[result["Time_Stamp"] == pd.to_datetime("2026-01-01")]["max"].iloc[0]
+        == 20.0
+    )
+
+    assert len(result.columns) == 5
+    assert len(result) == 2
