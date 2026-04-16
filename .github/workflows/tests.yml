@@ -17,11 +17,11 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
       - name: Create Streamlit secrets file
+        env:
+          TEST_SECRETS: ${{ secrets.TEST_SECRETS }}
         run: |
           mkdir -p .streamlit
-          cat << 'EOF' > .streamlit/secrets.toml
-          ${{ secrets.LBMP_DATA }}
-          EOF
+          echo "$TEST_SECRETS" > .streamlit/secrets.toml
       - name: Run tests
         # https://pytest-cov.readthedocs.io/en/latest/readme.html
         run: python -m pytest --cov
