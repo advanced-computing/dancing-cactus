@@ -1,11 +1,18 @@
+import os
+import sys
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.append(PROJECT_ROOT)
+
 import pandas as pd
 
 from google.cloud import bigquery
 import streamlit as st
 from google.oauth2 import service_account
 
-from market_analysis import load_nyiso_realtime
-from market_analysis import get_processed_electricity_data
+from app.market_analysis import load_nyiso_realtime
+from app.market_analysis import get_processed_electricity_data
 
 creds_info = st.secrets["gcp_service_account"]
 credentials = service_account.Credentials.from_service_account_info(creds_info)
