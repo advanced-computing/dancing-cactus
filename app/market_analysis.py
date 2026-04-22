@@ -16,7 +16,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from src.bigquery_utils import load_henry_hub_from_bigquery
+from src.bigquery_utils import load_henry_hub_from_bigquery  # noqa: E402
 
 # ------ Page config ------
 st.set_page_config(page_title="Energy Market Analysis", layout="wide")
