@@ -5,14 +5,14 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-import pandas as pd
+import pandas as pd  # noqa: E402
 
-from google.cloud import bigquery
-import streamlit as st
-from google.oauth2 import service_account
+from google.cloud import bigquery  # noqa: E402
+import streamlit as st  # noqa: E402
+from google.oauth2 import service_account  # noqa: E402
 
-from app.market_analysis import load_nyiso_realtime
-from app.market_analysis import get_processed_electricity_data
+from app.market_analysis import load_nyiso_realtime  # noqa: E402
+from app.market_analysis import get_processed_electricity_data  # noqa: E402
 
 creds_info = st.secrets["gcp_service_account"]
 credentials = service_account.Credentials.from_service_account_info(creds_info)
