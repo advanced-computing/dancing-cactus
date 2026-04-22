@@ -9,7 +9,14 @@ import altair as alt
 import pandas_gbq
 from google.oauth2 import service_account
 
-from bigquery_utils import load_henry_hub_from_bigquery
+import os
+import sys
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.append(PROJECT_ROOT)
+
+from src.bigquery_utils import load_henry_hub_from_bigquery
 
 # ------ Page config ------
 st.set_page_config(page_title="Energy Market Analysis", layout="wide")
