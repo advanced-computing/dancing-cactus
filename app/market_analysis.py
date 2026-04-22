@@ -9,7 +9,17 @@ import altair as alt
 import pandas_gbq
 from google.oauth2 import service_account
 
-from bigquery_utils import load_henry_hub_from_bigquery
+import json
+import plotly.express as px
+
+import os
+import sys
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.append(PROJECT_ROOT)
+
+from src.bigquery_utils import load_henry_hub_from_bigquery  # noqa: E402
 
 # ------ Page config ------
 st.set_page_config(page_title="Energy Market Analysis", layout="wide")
@@ -30,6 +40,19 @@ ZONE_MAP = {
     "LONGIL": "K - Long Island",
 }
 
+MAP_ZONE_MAP = {
+    "WEST": "A",
+    "GENESE": "B",
+    "CENTRL": "C",
+    "NORTH": "D",
+    "MHK VL": "E",
+    "CAPITL": "F",
+    "HUD VL": "G",
+    "MILLWD": "H",
+    "DUNWOD": "I",
+    "N.Y.C.": "J",
+    "LONGIL": "K",
+}
 
 # ------ Credentials ------
 creds = st.secrets["gcp_service_account"]
@@ -189,6 +212,126 @@ def create_demand_chart(LBMP_load: pd.DataFrame, selected_zone: str) -> alt.Char
     )
 
 
+@st.cache_data
+def load_nyiso_geojson():
+    geojson_path = os.path.join(PROJECT_ROOT, "data", "geo", "nyiso_zones.geojson")
+    if not os.path.exists(geojson_path):
+        return None
+
+    with open(geojson_path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+@st.cache_data
+def prepare_map_data(lbpm_load: pd.DataFrame) -> pd.DataFrame:
+    df = lbpm_load.copy()
+
+    df["Time_Stamp"] = pd.to_datetime(df["Time_Stamp"], errors="coerce")
+    df = df.dropna(subset=["Time_Stamp", "Name", "Load", "LBMP____MWHr_"])
+
+    df["zone_code"] = df["Name"].map(MAP_ZONE_MAP)
+    df = df.dropna(subset=["zone_code"])
+
+    df["map_date"] = df["Time_Stamp"].dt.date
+    df["map_hour"] = df["Time_Stamp"].dt.hour
+
+    grouped = df.groupby(["map_date", "map_hour", "zone_code"], as_index=False).agg(
+        avg_load=("Load", "mean"),
+        avg_lbmp=("LBMP____MWHr_", "mean"),
+    )
+    return grouped
+
+
+def render_zone_map(lbpm_load: pd.DataFrame) -> None:
+    st.subheader("NYISO Zone Map")
+    st.write(
+        "This map shows the average load or average LBMP across NYISO zones "
+        "for a selected day and hour in the chosen month."
+    )
+
+    geojson_data = load_nyiso_geojson()
+    if geojson_data is None:
+        st.warning("Map file not found: data/geo/nyiso_zones.geojson")
+        return
+
+    map_df = prepare_map_data(lbpm_load)
+    if map_df.empty:
+        st.warning("No map data available.")
+        return
+
+    col1, col2, col3 = st.columns(3)
+
+    available_dates = sorted(map_df["map_date"].unique())
+    selected_date = col1.selectbox(
+        "Select date for map", available_dates, key="map_date_select"
+    )
+
+    selected_hour = col2.slider(
+        "Select hour",
+        min_value=0,
+        max_value=23,
+        value=18,
+        step=1,
+        key="map_hour_slider",
+    )
+
+    selected_metric = col3.selectbox(
+        "Map metric", ["Average Load", "Average LBMP"], key="map_metric_select"
+    )
+
+    filtered = map_df[
+        (map_df["map_date"] == selected_date) & (map_df["map_hour"] == selected_hour)
+    ].copy()
+
+    if filtered.empty:
+        st.info("No zone data available for this date and hour.")
+        return
+
+    if selected_metric == "Average Load":
+        color_col = "avg_load"
+        color_scale = "Blues"
+        legend_title = "Load (MW)"
+    else:
+        color_col = "avg_lbmp"
+        color_scale = "Reds"
+        legend_title = "LBMP ($/MWh)"
+
+    fig = px.choropleth_mapbox(
+        filtered,
+        geojson=geojson_data,
+        locations="zone_code",
+        featureidkey="properties.Zone",
+        color=color_col,
+        color_continuous_scale=color_scale,
+        mapbox_style="carto-darkmatter",
+        center={"lat": 42.9, "lon": -75.5},
+        zoom=5.5,
+        opacity=0.72,
+        hover_name="zone_code",
+        hover_data={
+            "avg_load": ":.1f",
+            "avg_lbmp": ":.2f",
+            "zone_code": False,
+        },
+        title=f"{selected_metric} by NYISO Zone | {selected_date} {selected_hour:02d}:00",
+    )
+
+    fig.update_layout(
+        height=620,
+        margin={"r": 0, "t": 60, "l": 0, "b": 0},
+        coloraxis_colorbar=dict(title=legend_title),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.dataframe(
+        filtered.sort_values(color_col, ascending=False).reset_index(drop=True),
+        use_container_width=True,
+    )
+
+
 def compute_gas_metrics(df: pd.DataFrame) -> dict[str, str]:
     avg_price = df["price"].mean()
     max_price = df["price"].max()
@@ -295,6 +438,10 @@ def render_demand_section(year: int, month: int) -> None:
 
     st.write("**Interpretation**")
     st.write(demand_interpretation(LBMP_load, selected_zone))
+
+    st.divider()
+    render_zone_map(LBMP_load)
+    st.divider()
 
 
 def render_electricity_section(year: int, month: int) -> None:
