@@ -230,11 +230,75 @@ def prepare_map_data(lbpm_load: pd.DataFrame) -> pd.DataFrame:
     return grouped
 
 
+def map_interpretation(df: pd.DataFrame) -> str:
+    peak_load_zone = df.loc[df["avg_load"].idxmax()]["zone_code"]
+    peak_price_zone = df.loc[df["avg_lbmp"].idxmax()]["zone_code"]
+
+    avg_load = df["avg_load"].mean()
+    avg_price = df["avg_lbmp"].mean()
+
+    return (
+        f"The maps highlight spatial differences in both electricity demand and pricing across NYISO zones. "
+        f"At the selected time, zone {peak_load_zone} experiences the highest average load, while zone {peak_price_zone} "
+        f"records the highest electricity price.\n\n"
+        f"In general, areas with higher demand tend to exhibit higher price levels, reflecting the supply-demand "
+        f"dynamics of electricity markets. However, the relationship is not perfectly uniform across zones. "
+        f"Some zones may experience relatively high prices even without the highest load, which can be explained by "
+        f"transmission constraints, local congestion, or differences in generation mix.\n\n"
+        f"Compared with the system-wide average load of {avg_load:,.0f} MW and average price of ${avg_price:.2f}/MWh, "
+        f"the variation across zones illustrates the importance of spatial heterogeneity in electricity markets. "
+        f"This reinforces the idea that electricity pricing is highly location-dependent rather than determined by "
+        f"a single system-wide equilibrium."
+    )
+
+
+def make_zone_choropleth(
+    filtered: pd.DataFrame,
+    geojson_data: dict,
+    color_col: str,
+    title: str,
+    color_scale: str,
+    legend_title: str,
+):
+    fig = px.choropleth_mapbox(
+        filtered,
+        geojson=geojson_data,
+        locations="zone_code",
+        featureidkey="properties.Zone",
+        color=color_col,
+        color_continuous_scale=color_scale,
+        mapbox_style="carto-darkmatter",
+        center={"lat": 42.9, "lon": -75.5},
+        zoom=5.3,
+        opacity=0.72,
+        hover_name="zone_code",
+        hover_data={
+            "avg_load": ":.1f",
+            "avg_lbmp": ":.2f",
+            "zone_code": False,
+        },
+        title=title,
+    )
+
+    fig.update_layout(
+        height=520,
+        margin={"r": 0, "t": 45, "l": 0, "b": 0},
+        coloraxis_colorbar=dict(title=legend_title),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+    )
+
+    return fig
+
+
 def render_zone_map(lbpm_load: pd.DataFrame) -> None:
     st.subheader("NYISO Zone Map")
     st.write(
-        "This map shows the average load or average LBMP across NYISO zones "
-        "for a selected day and hour in the chosen month."
+        "These two maps compare average load and average LBMP across NYISO zones "
+        "for the same selected day and hour."
+    )
+    st.caption(
+        "Comparing demand (left) and price (right) reveals how spatial imbalances drive electricity pricing."
     )
 
     geojson_data = load_nyiso_geojson()
@@ -247,11 +311,13 @@ def render_zone_map(lbpm_load: pd.DataFrame) -> None:
         st.warning("No map data available.")
         return
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
 
     available_dates = sorted(map_df["map_date"].unique())
     selected_date = col1.selectbox(
-        "Select date for map", available_dates, key="map_date_select"
+        "Select date for maps",
+        available_dates,
+        key="map_date_select",
     )
 
     selected_hour = col2.slider(
@@ -263,10 +329,6 @@ def render_zone_map(lbpm_load: pd.DataFrame) -> None:
         key="map_hour_slider",
     )
 
-    selected_metric = col3.selectbox(
-        "Map metric", ["Average Load", "Average LBMP"], key="map_metric_select"
-    )
-
     filtered = map_df[
         (map_df["map_date"] == selected_date) & (map_df["map_hour"] == selected_hour)
     ].copy()
@@ -275,48 +337,41 @@ def render_zone_map(lbpm_load: pd.DataFrame) -> None:
         st.info("No zone data available for this date and hour.")
         return
 
-    if selected_metric == "Average Load":
-        color_col = "avg_load"
-        color_scale = "Blues"
-        legend_title = "Load (MW)"
-    else:
-        color_col = "avg_lbmp"
-        color_scale = "Reds"
-        legend_title = "LBMP ($/MWh)"
+    left_map, right_map = st.columns(2)
 
-    fig = px.choropleth_mapbox(
-        filtered,
-        geojson=geojson_data,
-        locations="zone_code",
-        featureidkey="properties.Zone",
-        color=color_col,
-        color_continuous_scale=color_scale,
-        mapbox_style="carto-darkmatter",
-        center={"lat": 42.9, "lon": -75.5},
-        zoom=5.5,
-        opacity=0.72,
-        hover_name="zone_code",
-        hover_data={
-            "avg_load": ":.1f",
-            "avg_lbmp": ":.2f",
-            "zone_code": False,
-        },
-        title=f"{selected_metric} by NYISO Zone | {selected_date} {selected_hour:02d}:00",
+    load_fig = make_zone_choropleth(
+        filtered=filtered,
+        geojson_data=geojson_data,
+        color_col="avg_load",
+        title=f"Average Load by NYISO Zone | {selected_date} {selected_hour:02d}:00",
+        color_scale="Blues",
+        legend_title="Load (MW)",
     )
 
-    fig.update_layout(
-        height=620,
-        margin={"r": 0, "t": 60, "l": 0, "b": 0},
-        coloraxis_colorbar=dict(title=legend_title),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
+    price_fig = make_zone_choropleth(
+        filtered=filtered,
+        geojson_data=geojson_data,
+        color_col="avg_lbmp",
+        title=f"Average LBMP by NYISO Zone | {selected_date} {selected_hour:02d}:00",
+        color_scale="Reds",
+        legend_title="LBMP ($/MWh)",
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    with left_map:
+        st.plotly_chart(load_fig, use_container_width=True)
 
-    st.dataframe(
-        filtered.sort_values(color_col, ascending=False).reset_index(drop=True),
-        use_container_width=True,
+    with right_map:
+        st.plotly_chart(price_fig, use_container_width=True)
+
+    with st.expander("Preview zone-level map data"):
+        st.dataframe(
+            filtered.sort_values("avg_load", ascending=False).reset_index(drop=True),
+            use_container_width=True,
+        )
+
+    st.write(map_interpretation(filtered))
+    st.info(
+        "Key takeaway: Electricity prices are shaped not only by demand levels but by where that demand occurs within the grid."
     )
 
 
@@ -428,7 +483,10 @@ def render_demand_section(year: int, month: int) -> None:
     st.write(demand_interpretation(LBMP_load, selected_zone))
 
     st.divider()
+    st.subheader("Spatial Distribution Across NYISO Zones")
+
     render_zone_map(LBMP_load)
+
     st.divider()
 
 
@@ -598,15 +656,7 @@ def main() -> None:
 
     render_electricity_section(year, month)
 
-    gas_available = False
-    try:
-        gas_df = load_henry_hub_data()
-        gas_available = True
-        render_gas_section(gas_df)
-    except Exception as exc:
-        render_gas_unavailable(exc)
-
-    render_comparison_section(gas_available=gas_available)
+    render_comparison_section(gas_available=True)
 
 
 if __name__ == "__main__":
