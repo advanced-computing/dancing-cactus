@@ -176,18 +176,16 @@ def create_comparison_graph(electricity_df: pd.DataFrame, gas_df: pd.DataFrame) 
 
 def create_demand_chart(LBMP_load: pd.DataFrame, selected_zone: str) -> alt.Chart:
     df_filtered = LBMP_load[LBMP_load["Name"] == selected_zone].copy()
-    upper = df_filtered["LBMP____MWHr_"].quantile(0.99)
-    df_plot = df_filtered[df_filtered["LBMP____MWHr_"] <= upper]
 
-    df_plot["Hour"] = pd.to_datetime(df_plot["Time_Stamp"]).dt.hour
-    df_plot["time of day"] = pd.cut(
-        df_plot["Hour"],
+    df_filtered["Hour"] = pd.to_datetime(df_filtered["Time_Stamp"]).dt.hour
+    df_filtered["time of day"] = pd.cut(
+        df_filtered["Hour"],
         bins=[-1, 5, 11, 17, 23],
         labels=["Night", "Morning", "Afternoon", "Evening"],
     )
 
     points = (
-        alt.Chart(df_plot)
+        alt.Chart(df_filtered)
         .mark_circle(opacity=0.4, size=20)
         .encode(
             x=alt.X("Load", title="Load (MW)", scale=alt.Scale(zero=False)),
@@ -197,17 +195,7 @@ def create_demand_chart(LBMP_load: pd.DataFrame, selected_zone: str) -> alt.Char
         )
     )
 
-    regression = (
-        alt.Chart(df_plot)
-        .transform_regression("Load", "LBMP____MWHr_")
-        .mark_line(color="red", strokeDash=[5, 5], strokeWidth=3)
-        .encode(
-            x="Load:Q",
-            y="LBMP____MWHr_:Q",
-        )
-    )
-
-    return (points + regression).properties(
+    return points.properties(
         title=f"Load vs. LBMP for {selected_zone} in the selected month"
     )
 

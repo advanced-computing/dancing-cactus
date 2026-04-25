@@ -234,5 +234,5 @@ $RECYCLE.BIN/
 
 # End of https://www.toptal.com/developers/gitignore/api/macos,python,windows
 
-.streamlit/secrets.toml
+app/.streamlit/secrets.toml
 *.json
