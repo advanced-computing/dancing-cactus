@@ -62,11 +62,8 @@ def main() -> None:
         """
         * How does the Locational Based Marginal Price(LBMP) in NYC fluctuate according to the change in demand? (Although LBMP is a wholesale price, not a retail price, analyzing LBMP instead of retail price is insightful because LBMP reflects dynamic demand shifts more clearly than retail price, 
         which does not change so often compared to the wholesale price.)
-        * How does the change in fuel mix during the day affect the LBMP in NY state? I can expect that LBMP will fall during daytime or sunny days and rise during night and rainy days because renewables such as solar energy can generate electricity at a cheaper price. 
         * How does the change in energy prices, for example, the rise of the price of natural gas, affect the LBMP? We can of course include several kinds of energy sources, like oil and coal.
-        (If time allows)
-        * What is the relationship between electricity consumption and air quality in the NY state? (We can analyze the relation between absolute electricity usage and air quality, or the proportion of green energy and air quality. At the same time, air quality has multiple aspects, 
-        such as CO/PM2.5/NO2, which also brings us space for in-depth discussion)
+        * How does the change in fuel mix during the day affect the LBMP in NY state? We can expect that LBMP will fall during daytime or sunny days and rise during night and rainy days because renewables such as solar energy can generate electricity at a cheaper price. 
         """
     )
 
@@ -75,9 +72,7 @@ def main() -> None:
         """
         * NY state Energy Market & Operational Data: https://www.nyiso.com/real-time-dashboard  
         https://mis.nyiso.com/public/P-24Alist.htm
-        * Oil price: https://www.eia.gov/dnav/pet/pet_pri_spt_s1_d.htm
         * Natural gas price: https://www.eia.gov/dnav/ng/hist/rngwhhdD.htm
-        * Air Quality https://www.epa.gov/outdoor-air-quality-data/download-daily-data
         """
     )
 
@@ -102,9 +97,6 @@ def main() -> None:
         
         2. External Confounding Factors
         Weather conditions (temperature, precipitation, solar radiation) simultaneously affect demand, renewable generation, and air quality. Failing to control for these factors may bias estimated relationships.
-        
-        3. Air Quality Attribution
-        Air quality indicators such as PM2.5 or NO₂ are influenced by multiple emission sources beyond electricity generation (e.g., transportation, industrial activity). Isolating the contribution of electricity demand may therefore require additional controls or robustness checks.
         """
     )
 
