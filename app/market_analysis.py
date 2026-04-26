@@ -54,6 +54,16 @@ MAP_ZONE_MAP = {
     "LONGIL": "K",
 }
 
+today = datetime.date.today()
+latest_month = today.strftime("%Y-%m")
+time_period = (
+    pd.date_range(start="2017-01", end=latest_month, freq="MS")
+    .strftime("%Y-%m")
+    .tolist()
+)
+time_period = time_period[::-1]  # reverse to show latest month first
+one_month_ago = (today.replace(day=1) - datetime.timedelta(days=1)).strftime("%Y-%m")
+
 # ------ Credentials ------
 creds = st.secrets["gcp_service_account"]
 credentials = service_account.Credentials.from_service_account_info(creds)
@@ -61,20 +71,14 @@ credentials = service_account.Credentials.from_service_account_info(creds)
 
 # ------ API loaders -------
 @st.cache_data(ttl=3600)
-def load_nyiso_realtime(selected_month) -> any:
+def load_nyiso_realtime(month) -> any:
 
-    start_date = datetime.datetime.strptime(selected_month, "%Y-%m-%d")
-
-    if start_date.month == 12:
-        end_date = datetime.datetime(start_date.year + 1, 1, 1)
-    else:
-        end_date = datetime.datetime(start_date.year, start_date.month + 1, 1)
+    month_list = ",".join(f"'{m}'" for m in month)
 
     sql = f"""
-    SELECT Time_Stamp, Name, LBMP____MWHr_ 
-    FROM `sipa-adv-c-dancing-cactus.dataset.market_analysis` 
-    WHERE Time_Stamp >= '{start_date.strftime("%Y-%m-%d")}'
-    AND Time_Stamp < '{end_date.strftime("%Y-%m-%d")}'
+    SELECT hourly_time_stamp, Name, LBMP 
+    FROM `sipa-adv-c-dancing-cactus.dataset.hourly_lbmp` 
+    WHERE FORMAT_DATE('%Y-%m', hourly_time_stamp) IN ({month_list})
     """
     df = pandas_gbq.read_gbq(sql, credentials=credentials)
     return df
@@ -100,39 +104,35 @@ def load_henry_hub_data() -> pd.DataFrame:
 
 
 @st.cache_data(ttl=3600)
-def merge_load_and_lbmp(year: int, month: int) -> pd.DataFrame:
-    start = datetime.datetime(year, month, 1)
-    if month == 12:
-        end = datetime.datetime(year + 1, 1, 1)
-    else:
-        end = datetime.datetime(year, month + 1, 1)
+def merge_load_and_lbmp(month: list) -> pd.DataFrame:
+    month_list = ",".join(f"'{m}'" for m in month)
 
     sql_1 = f"""
     SELECT Time_Stamp, Name, Load 
     FROM `sipa-adv-c-dancing-cactus.dataset.actual_load` 
-    WHERE Time_Stamp >= '{start.strftime("%Y-%m-%d")}'
-    AND Time_Stamp < '{end.strftime("%Y-%m-%d")}'
+    WHERE FORMAT_DATE('%Y-%m', Time_Stamp) IN ({month_list})
     """
 
     load_df = pandas_gbq.read_gbq(sql_1, credentials=credentials)
 
     sql_2 = f"""
-    SELECT Time_Stamp, Name, LBMP____MWHr_ 
-    FROM `sipa-adv-c-dancing-cactus.dataset.market_analysis` 
-    WHERE Time_Stamp >= '{start.strftime("%Y-%m-%d")}'
-    AND Time_Stamp < '{end.strftime("%Y-%m-%d")}'
+    SELECT hourly_time_stamp, Name, LBMP 
+    FROM `sipa-adv-c-dancing-cactus.dataset.hourly_lbmp` 
+    WHERE FORMAT_DATE('%Y-%m', hourly_time_stamp) IN ({month_list})
     """
 
     lbmp_df = pandas_gbq.read_gbq(sql_2, credentials=credentials)
 
     load_df["Time_Stamp"] = pd.to_datetime(load_df["Time_Stamp"], errors="coerce")
-    lbmp_df["Time_Stamp"] = pd.to_datetime(lbmp_df["Time_Stamp"], errors="coerce")
+    lbmp_df["hourly_time_stamp"] = pd.to_datetime(
+        lbmp_df["hourly_time_stamp"], errors="coerce"
+    )
 
     merged = pd.merge(
         load_df,
         lbmp_df,
         left_on=["Time_Stamp", "Name"],
-        right_on=["Time_Stamp", "Name"],
+        right_on=["hourly_time_stamp", "Name"],
         how="inner",
     )
     return merged
@@ -142,18 +142,20 @@ def merge_load_and_lbmp(year: int, month: int) -> pd.DataFrame:
 def get_processed_electricity_data(df: pd.DataFrame, zone: str) -> pd.DataFrame:
     daily_df = (
         df.groupby("Name")
-        .resample("D", on="Time_Stamp")["LBMP____MWHr_"]
+        .resample("D", on="hourly_time_stamp")["LBMP"]
         .agg(["mean", "max", "min"])
         .reset_index()
     )
 
     zone_df = daily_df.loc[daily_df["Name"] == zone].copy()
-    zone_df = zone_df.sort_values("Time_Stamp")
+    zone_df = zone_df.sort_values("hourly_time_stamp")
     return zone_df
 
 
 def create_comparison_graph(electricity_df: pd.DataFrame, gas_df: pd.DataFrame) -> None:
-    base = alt.Chart(electricity_df).encode(alt.X("Time_Stamp").axis(title="Date"))
+    base = alt.Chart(electricity_df).encode(
+        alt.X("hourly_time_stamp").axis(title="Date")
+    )
 
     area = base.mark_area(opacity=0.3, color="lightblue").encode(
         alt.Y("max").axis(title="LBMP($/MWh)", titleColor="blue"),
@@ -184,15 +186,20 @@ def create_demand_chart(LBMP_load: pd.DataFrame, selected_zone: str) -> alt.Char
         labels=["Night", "Morning", "Afternoon", "Evening"],
     )
 
+    df_filtered["month"] = (
+        pd.to_datetime(df_filtered["Time_Stamp"]).dt.to_period("M").astype(str)
+    )
+
     points = (
         alt.Chart(df_filtered)
         .mark_circle(opacity=0.4, size=20)
         .encode(
             x=alt.X("Load", title="Load (MW)", scale=alt.Scale(zero=False)),
-            y=alt.Y("LBMP____MWHr_", title="Electricity price ($/MWh)"),
+            y=alt.Y("LBMP", title="Electricity price ($/MWh)"),
             color=alt.Color("time of day:N", title="Time of Day"),
-            tooltip=["Time_Stamp", "Load", "LBMP____MWHr_"],
+            tooltip=["Time_Stamp", "Load", "LBMP"],
         )
+        .facet("month:N", columns=2)
     )
 
     return points.properties(
@@ -215,7 +222,7 @@ def prepare_map_data(lbpm_load: pd.DataFrame) -> pd.DataFrame:
     df = lbpm_load.copy()
 
     df["Time_Stamp"] = pd.to_datetime(df["Time_Stamp"], errors="coerce")
-    df = df.dropna(subset=["Time_Stamp", "Name", "Load", "LBMP____MWHr_"])
+    df = df.dropna(subset=["Time_Stamp", "Name", "Load", "LBMP"])
 
     df["zone_code"] = df["Name"].map(MAP_ZONE_MAP)
     df = df.dropna(subset=["zone_code"])
@@ -225,7 +232,7 @@ def prepare_map_data(lbpm_load: pd.DataFrame) -> pd.DataFrame:
 
     grouped = df.groupby(["map_date", "map_hour", "zone_code"], as_index=False).agg(
         avg_load=("Load", "mean"),
-        avg_lbmp=("LBMP____MWHr_", "mean"),
+        avg_lbmp=("LBMP", "mean"),
     )
     return grouped
 
@@ -314,9 +321,11 @@ def render_zone_map(lbpm_load: pd.DataFrame) -> None:
     col1, col2 = st.columns(2)
 
     available_dates = sorted(map_df["map_date"].unique())
+
     selected_date = col1.selectbox(
         "Select date for maps",
         available_dates,
+        index=len(available_dates) - 1,
         key="map_date_select",
     )
 
@@ -402,7 +411,7 @@ def graph_legend() -> str:
 
 def demand_interpretation(df: pd.DataFrame, zone: str) -> str:
     avg_load = df["Load"].mean()
-    avg_lbmp = df["LBMP____MWHr_"].mean()
+    avg_lbmp = df["LBMP"].mean()
     max_load = df["Load"].max()
 
     return (
@@ -459,15 +468,19 @@ def render_intro() -> None:
     st.divider()
 
 
-def render_demand_section(year: int, month: int) -> None:
+def render_demand_section(month: int) -> None:
     st.header("Electricity Price vs. Load")
     st.write("""        
         This section explores the relationship between electricity prices and demand (load) in the selected NYISO zone and month. 
-        The scatter plot shows how LBMP varies with load, colored by time of day.
+        How does the price change as load increases? Are there certain times of day when prices are more volatile? 
         """)
 
     with st.spinner("Loading demand data..."):
-        LBMP_load = merge_load_and_lbmp(year, month)
+        LBMP_load = merge_load_and_lbmp(month)
+
+    st.subheader("Spatial Distribution Across NYISO Zones")
+
+    render_zone_map(LBMP_load)
 
     selected_zone = st.selectbox(
         "Select a NYISO zone",
@@ -476,6 +489,7 @@ def render_demand_section(year: int, month: int) -> None:
         index=list(ZONE_MAP.keys()).index("N.Y.C."),
         key="demand_zone_select",
     )
+
     chart = create_demand_chart(LBMP_load, selected_zone)
     st.altair_chart(chart, use_container_width=True)
 
@@ -483,14 +497,9 @@ def render_demand_section(year: int, month: int) -> None:
     st.write(demand_interpretation(LBMP_load, selected_zone))
 
     st.divider()
-    st.subheader("Spatial Distribution Across NYISO Zones")
-
-    render_zone_map(LBMP_load)
-
-    st.divider()
 
 
-def render_electricity_section(year: int, month: int) -> None:
+def render_electricity_section(month: int) -> None:
     st.header("The Comparison of Electricity and Gas Markets")
 
     st.write(
@@ -501,15 +510,8 @@ def render_electricity_section(year: int, month: int) -> None:
     )
 
     # input month and zone
-    selected_month = datetime.date(year, month, 1)
-    selected_month_str = selected_month.strftime("%Y-%m-%d")
-
-    if selected_month > datetime.date.today():
-        st.error("No data available.")
-        st.stop()
-
     try:
-        realtime_df = load_nyiso_realtime(selected_month_str)
+        realtime_df = load_nyiso_realtime(month)
         selected_zone = st.selectbox(
             "Select a NYISO zone",
             options=list(ZONE_MAP.keys()),
@@ -521,9 +523,7 @@ def render_electricity_section(year: int, month: int) -> None:
         zone_df = get_processed_electricity_data(realtime_df, selected_zone)
 
         gas_df = load_henry_hub_data()
-        filtered = gas_df[
-            (gas_df["date"].dt.year == year) & (gas_df["date"].dt.month == month)
-        ]
+        filtered = gas_df[(gas_df["date"].dt.to_period("M").astype(str).isin(month))]
 
         chart = create_comparison_graph(zone_df, filtered)
         st.altair_chart(chart, use_container_width=True)
@@ -647,14 +647,33 @@ def main() -> None:
     render_sidebar()
     render_intro()
 
-    year = st.selectbox(
-        "Year for electricity data", range(2017, 2027), index=9, key="global_year"
-    )
-    month = st.selectbox("Month for electricity data", range(1, 13), key="global_month")
+    col_start, col_end = st.columns(2)
+    with col_start:
+        start_month = st.select_slider(
+            "Start Month", options=time_period[::-1], value=one_month_ago
+        )
+    with col_end:
+        end_month = st.select_slider(
+            "End Month", options=time_period[::-1], value=latest_month
+        )
 
-    render_demand_section(year, month)
+    start_idx = time_period.index(start_month)
+    end_idx = time_period.index(end_month)
+    if start_idx < end_idx:
+        start_idx, end_idx = end_idx, start_idx
+    month = time_period[end_idx : start_idx + 1]
 
-    render_electricity_section(year, month)
+    if not month:
+        st.warning("invalid period selected.")
+        st.stop()
+
+    if len(month) > 4:
+        st.warning("Please select a period of 4 months or less to ensure performance.")
+        st.stop()
+
+    render_demand_section(month)
+
+    render_electricity_section(month)
 
     render_comparison_section(gas_available=True)
 
