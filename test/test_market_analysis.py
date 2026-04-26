@@ -28,7 +28,7 @@ def test_load_nyiso_realtime():
 
     sql_1 = """
     SELECT hourly_time_stamp, Name, LBMP 
-    FROM `sipa-adv-c-dancing-cactus.dataset.hourly_data` 
+    FROM `sipa-adv-c-dancing-cactus.dataset.hourly_lbmp` 
     WHERE hourly_time_stamp >= '2025-12-01'
     AND hourly_time_stamp < '2026-01-01'
     """
@@ -50,7 +50,7 @@ def test_load_nyiso_realtime():
 
     sql_2 = """
     SELECT hourly_time_stamp, Name, LBMP 
-    FROM `sipa-adv-c-dancing-cactus.dataset.hourly_data` 
+    FROM `sipa-adv-c-dancing-cactus.dataset.hourly_lbmp` 
     WHERE hourly_time_stamp >= '2024-05-01'
     AND hourly_time_stamp < '2024-06-01'
     """
