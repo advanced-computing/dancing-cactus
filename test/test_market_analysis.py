@@ -24,13 +24,12 @@ client = bigquery.Client(credentials=credentials, project=project_id)
 
 
 def test_load_nyiso_realtime():
-    selected_month_1 = "2025-12-01"
+    selected_month_1 = ["2025-12"]
 
     sql_1 = """
     SELECT hourly_time_stamp, Name, LBMP 
     FROM `sipa-adv-c-dancing-cactus.dataset.hourly_lbmp` 
-    WHERE hourly_time_stamp >= '2025-12-01'
-    AND hourly_time_stamp < '2026-01-01'
+    WHERE FORMAT_DATE('%Y-%m', hourly_time_stamp) = '2025-12'
     """
     client_job = client.query(sql_1)
     expected_df_1 = client_job.to_dataframe()
@@ -46,13 +45,12 @@ def test_load_nyiso_realtime():
 
     pd.testing.assert_frame_equal(selected_month_1_actual, expected_df_1_actual)
 
-    selected_month_2 = "2024-05-01"
+    selected_month_2 = ["2024-05"]
 
     sql_2 = """
     SELECT hourly_time_stamp, Name, LBMP 
     FROM `sipa-adv-c-dancing-cactus.dataset.hourly_lbmp` 
-    WHERE hourly_time_stamp >= '2024-05-01'
-    AND hourly_time_stamp < '2024-06-01'
+    WHERE FORMAT_DATE('%Y-%m', hourly_time_stamp) = '2024-05'
     """
 
     client_job = client.query(sql_2)
@@ -77,7 +75,7 @@ def test_get_processed_electricity_data():
                 ["2026-01-01 00:00", "2026-01-01 12:00", "2026-01-02 00:00"]
             ),
             "Name": ["Zone A", "Zone A", "Zone A"],
-            "LBMP____MWHr_": [10.0, 20.0, 30.0],
+            "LBMP": [10.0, 20.0, 30.0],
         }
     )
     result = get_processed_electricity_data(test_data, "Zone A")
