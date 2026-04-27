@@ -36,4 +36,4 @@ jobs:
         env:
           EIA_API_KEY: ${{ secrets.EIA_API_KEY }}
           GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-        run: python ${{ github.workspace }}/data_load/update_hourly_data.py
+        run: python ${{ github.workspace }}/data_load/Hourly_LBMP_update.py
