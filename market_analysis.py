@@ -276,8 +276,7 @@ def create_comparison_graph(electricity_df: pd.DataFrame, gas_df: pd.DataFrame) 
 def render_zone_map(lbpm_load: pd.DataFrame) -> None:
     st.write(
         "These two maps compare average load and average LBMP across NYISO zones "
-        "for the same selected day and hour."
-        "Notice where the two patterns align — and where they diverge. "
+        "for the same selected day and hour. Notice where the two patterns align — and where they diverge. "
     )
     geojson_data = load_nyiso_geojson()
     if geojson_data is None:
@@ -386,6 +385,21 @@ def render_sidebar() -> None:
         """
     )
 
+    st.sidebar.divider()
+
+    reversed_period = time_period[::-1]
+    default_start_idx = (
+        reversed_period.index(one_month_ago) if one_month_ago in reversed_period else 0
+    )
+
+    st.sidebar.subheader("Select Period")
+    start_month = st.sidebar.selectbox(
+        "Start Month", options=reversed_period, index=default_start_idx
+    )
+    end_month = st.sidebar.selectbox("End Month", options=reversed_period, index=0)
+
+    return start_month, end_month
+
 
 def render_intro() -> None:
     st.title("🏬 NY State Electricity Prices vs Demand and Supply")
@@ -396,7 +410,6 @@ def render_intro() -> None:
         2. Henry Hub natural gas prices, which serve as a benchmark for fuel costs that often influence electricity prices, especially in a gas-heavy generation mix like New York's.
         """
     )
-    st.divider()
 
 
 def render_demand_section(month: int) -> None:
@@ -487,26 +500,11 @@ def render_electricity_section(month: int) -> None:
         "while Henry Hub shows broader benchmark fuel conditions. "
     )
 
-    st.divider()
-
 
 # ------ Main ------
 def main() -> None:
-    render_sidebar()
+    start_month, end_month = render_sidebar()
     render_intro()
-
-    reversed_period = time_period[::-1]
-    default_start_idx = (
-        reversed_period.index(one_month_ago) if one_month_ago in reversed_period else 0
-    )
-
-    col_start, col_end = st.columns(2)
-    with col_start:
-        start_month = st.selectbox(
-            "Start Month", options=reversed_period, index=default_start_idx
-        )
-    with col_end:
-        end_month = st.selectbox("End Month", options=reversed_period, index=0)
 
     start_idx = time_period.index(start_month)
     end_idx = time_period.index(end_month)
