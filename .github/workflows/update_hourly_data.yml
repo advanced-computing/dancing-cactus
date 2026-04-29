@@ -32,8 +32,7 @@ jobs:
           echo "Python files in repository:"
           find . -type f -name "*.py" | sort
 
-      - name: Run Henry Hub ETL
+      - name: Update hourly data
         env:
-          EIA_API_KEY: ${{ secrets.EIA_API_KEY }}
-          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          LBMP_DATA: ${{ secrets.LBMP_DATA }}
         run: python ${{ github.workspace }}/data_load/Hourly_LBMP_update.py
