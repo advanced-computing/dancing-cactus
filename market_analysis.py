@@ -6,8 +6,9 @@ import pandas as pd
 import streamlit as st
 import altair as alt
 
-import pandas_gbq
 from google.oauth2 import service_account
+from google.cloud import bigquery
+from google.cloud.bigquery import Client
 
 import json
 import plotly.express as px
@@ -15,7 +16,7 @@ import plotly.express as px
 import os
 import sys
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
@@ -26,32 +27,18 @@ st.set_page_config(page_title="Energy Market Analysis", layout="wide")
 
 
 # ------ Constants ------
-ZONE_MAP = {
-    "WEST": "A - West (Buffalo/Niagara)",
-    "GENESE": "B - Genesee (Rochester)",
-    "CENTRL": "C - Central (Syracuse)",
-    "NORTH": "D - North (St. Lawrence)",
-    "MHK VL": "E - Mohawk Valley",
-    "CAPITL": "F - Capital (Albany)",
-    "HUD VL": "G - Hudson Valley",
-    "MILLWD": "H - Millwood",
-    "DUNWOD": "I - Dunwoodie",
-    "N.Y.C.": "J - New York City",
-    "LONGIL": "K - Long Island",
-}
-
-MAP_ZONE_MAP = {
-    "WEST": "A",
-    "GENESE": "B",
-    "CENTRL": "C",
-    "NORTH": "D",
-    "MHK VL": "E",
-    "CAPITL": "F",
-    "HUD VL": "G",
-    "MILLWD": "H",
-    "DUNWOD": "I",
-    "N.Y.C.": "J",
-    "LONGIL": "K",
+ZONE_INFO = {
+    "WEST": {"code": "A", "label": "A - West (Buffalo/Niagara)"},
+    "GENESE": {"code": "B", "label": "B - Genesee (Rochester)"},
+    "CENTRL": {"code": "C", "label": "C - Central (Syracuse)"},
+    "NORTH": {"code": "D", "label": "D - North (St. Lawrence)"},
+    "MHK VL": {"code": "E", "label": "E - Mohawk Valley"},
+    "CAPITL": {"code": "F", "label": "F - Capital (Albany)"},
+    "HUD VL": {"code": "G", "label": "G - Hudson Valley"},
+    "MILLWD": {"code": "H", "label": "H - Millwood"},
+    "DUNWOD": {"code": "I", "label": "I - Dunwoodie"},
+    "N.Y.C.": {"code": "J", "label": "J - New York City"},
+    "LONGIL": {"code": "K", "label": "K - Long Island"},
 }
 
 today = datetime.date.today()
@@ -61,7 +48,6 @@ time_period = (
     .strftime("%Y-%m")
     .tolist()
 )
-time_period = time_period[::-1]  # reverse to show latest month first
 one_month_ago = (today.replace(day=1) - datetime.timedelta(days=1)).strftime("%Y-%m")
 
 # ------ Credentials ------
@@ -69,10 +55,15 @@ creds = st.secrets["gcp_service_account"]
 credentials = service_account.Credentials.from_service_account_info(creds)
 
 
-# ------ API loaders -------
-@st.cache_data(ttl=3600)
-def load_nyiso_realtime(month) -> any:
+# ------ Data loaders -------
+@st.cache_resource
+def get_bq_client() -> Client:
+    return bigquery.Client(credentials=credentials, project="sipa-adv-c-dancing-cactus")
 
+
+@st.cache_data(ttl=3600)
+def load_lbmp(month: list) -> pd.DataFrame:
+    client = get_bq_client()
     month_list = ",".join(f"'{m}'" for m in month)
 
     sql = f"""
@@ -80,8 +71,39 @@ def load_nyiso_realtime(month) -> any:
     FROM `sipa-adv-c-dancing-cactus.dataset.hourly_lbmp` 
     WHERE FORMAT_DATE('%Y-%m', hourly_time_stamp) IN ({month_list})
     """
-    df = pandas_gbq.read_gbq(sql, credentials=credentials)
+    df = client.query(sql).to_dataframe()
+    df["hourly_time_stamp"] = pd.to_datetime(df["hourly_time_stamp"], errors="coerce")
     return df
+
+
+@st.cache_data(ttl=3600)
+def load_actual_load(month: list) -> pd.DataFrame:
+    client = get_bq_client()
+    month_list = ",".join(f"'{m}'" for m in month)
+
+    sql = f"""
+    SELECT Time_Stamp, Name, Load 
+    FROM `sipa-adv-c-dancing-cactus.dataset.actual_load` 
+    WHERE FORMAT_DATE('%Y-%m', Time_Stamp) IN ({month_list})
+    """
+    df = client.query(sql).to_dataframe()
+    df["Time_Stamp"] = pd.to_datetime(df["Time_Stamp"], errors="coerce")
+    return df
+
+
+@st.cache_data(ttl=3600)
+def merge_load_and_lbmp(month: list) -> pd.DataFrame:
+    load_df = load_actual_load(month)
+    lbmp_df = load_lbmp(month)
+
+    merged = pd.merge(
+        load_df,
+        lbmp_df,
+        left_on=["Time_Stamp", "Name"],
+        right_on=["hourly_time_stamp", "Name"],
+        how="inner",
+    )
+    return merged
 
 
 @st.cache_data(ttl=3600)
@@ -103,39 +125,81 @@ def load_henry_hub_data() -> pd.DataFrame:
     return df
 
 
-@st.cache_data(ttl=3600)
-def merge_load_and_lbmp(month: list) -> pd.DataFrame:
-    month_list = ",".join(f"'{m}'" for m in month)
+@st.cache_data
+def load_nyiso_geojson():
+    geojson_path = os.path.join(PROJECT_ROOT, "data", "geo", "nyiso_zones.geojson")
+    if not os.path.exists(geojson_path):
+        return None
 
-    sql_1 = f"""
-    SELECT Time_Stamp, Name, Load 
-    FROM `sipa-adv-c-dancing-cactus.dataset.actual_load` 
-    WHERE FORMAT_DATE('%Y-%m', Time_Stamp) IN ({month_list})
-    """
+    with open(geojson_path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
-    load_df = pandas_gbq.read_gbq(sql_1, credentials=credentials)
 
-    sql_2 = f"""
-    SELECT hourly_time_stamp, Name, LBMP 
-    FROM `sipa-adv-c-dancing-cactus.dataset.hourly_lbmp` 
-    WHERE FORMAT_DATE('%Y-%m', hourly_time_stamp) IN ({month_list})
-    """
+@st.cache_data
+def prepare_map_data(lbpm_load: pd.DataFrame) -> pd.DataFrame:
+    df = lbpm_load.copy()
 
-    lbmp_df = pandas_gbq.read_gbq(sql_2, credentials=credentials)
+    df["Time_Stamp"] = pd.to_datetime(df["Time_Stamp"], errors="coerce")
+    df = df.dropna(subset=["Time_Stamp", "Name", "Load", "LBMP"])
 
-    load_df["Time_Stamp"] = pd.to_datetime(load_df["Time_Stamp"], errors="coerce")
-    lbmp_df["hourly_time_stamp"] = pd.to_datetime(
-        lbmp_df["hourly_time_stamp"], errors="coerce"
+    df["zone_code"] = df["Name"].map(
+        lambda x: ZONE_INFO[x]["code"] if x in ZONE_INFO else None
+    )
+    df["zone_label"] = df["Name"].map(
+        lambda x: ZONE_INFO[x]["label"] if x in ZONE_INFO else None
+    )
+    df = df.dropna(subset=["zone_code"])
+
+    df["map_date"] = df["Time_Stamp"].dt.date
+    df["map_hour"] = df["Time_Stamp"].dt.hour
+
+    grouped = df.groupby(
+        ["map_date", "map_hour", "zone_code", "zone_label"], as_index=False
+    ).agg(
+        avg_load=("Load", "mean"),
+        avg_lbmp=("LBMP", "mean"),
+    )
+    return grouped
+
+
+def make_zone_choropleth(
+    filtered: pd.DataFrame,
+    geojson_data: dict,
+    color_col: str,
+    title: str,
+    color_scale: str,
+    legend_title: str,
+):
+    fig = px.choropleth_mapbox(
+        filtered,
+        geojson=geojson_data,
+        locations="zone_code",
+        featureidkey="properties.Zone",
+        color=color_col,
+        color_continuous_scale=color_scale,
+        mapbox_style="carto-positron",
+        center={"lat": 42.5, "lon": -75.5},
+        zoom=4.5,
+        opacity=0.72,
+        hover_name="zone_label",
+        hover_data={
+            "avg_load": ":.1f",
+            "avg_lbmp": ":.2f",
+            "zone_code": False,
+            "zone_label": False,
+        },
+        title=title,
     )
 
-    merged = pd.merge(
-        load_df,
-        lbmp_df,
-        left_on=["Time_Stamp", "Name"],
-        right_on=["hourly_time_stamp", "Name"],
-        how="inner",
+    fig.update_layout(
+        height=520,
+        margin={"r": 0, "t": 45, "l": 0, "b": 0},
+        coloraxis_colorbar=dict(title=legend_title),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
     )
-    return merged
+
+    return fig
 
 
 # ------ Metric functions -------
@@ -150,6 +214,39 @@ def get_processed_electricity_data(df: pd.DataFrame, zone: str) -> pd.DataFrame:
     zone_df = daily_df.loc[daily_df["Name"] == zone].copy()
     zone_df = zone_df.sort_values("hourly_time_stamp")
     return zone_df
+
+
+def create_demand_scatter_plot(
+    LBMP_load: pd.DataFrame, selected_zone: str
+) -> alt.Chart:
+    df_filtered = LBMP_load[LBMP_load["Name"] == selected_zone].copy()
+
+    df_filtered["Hour"] = pd.to_datetime(df_filtered["Time_Stamp"]).dt.hour
+    df_filtered["time of day"] = pd.cut(
+        df_filtered["Hour"],
+        bins=[-1, 5, 11, 17, 23],
+        labels=["Night", "Morning", "Afternoon", "Evening"],
+    )
+
+    df_filtered["month"] = (
+        pd.to_datetime(df_filtered["Time_Stamp"]).dt.to_period("M").astype(str)
+    )
+
+    points = (
+        alt.Chart(df_filtered)
+        .mark_circle(opacity=0.4, size=20)
+        .encode(
+            x=alt.X("Load", title="Load (MW)", scale=alt.Scale(zero=False)),
+            y=alt.Y("LBMP", title="Electricity price ($/MWh)"),
+            color=alt.Color("time of day:N", title="Time of Day"),
+            tooltip=["Time_Stamp", "Load", "LBMP"],
+        )
+        .facet("month:N", columns=3)
+    )
+
+    return points.properties(
+        title=f"Load vs. LBMP for {selected_zone} in the selected month"
+    )
 
 
 def create_comparison_graph(electricity_df: pd.DataFrame, gas_df: pd.DataFrame) -> None:
@@ -176,138 +273,11 @@ def create_comparison_graph(electricity_df: pd.DataFrame, gas_df: pd.DataFrame) 
     return alt.layer(electricity_chart, line_gas).resolve_scale(y="independent")
 
 
-def create_demand_chart(LBMP_load: pd.DataFrame, selected_zone: str) -> alt.Chart:
-    df_filtered = LBMP_load[LBMP_load["Name"] == selected_zone].copy()
-
-    df_filtered["Hour"] = pd.to_datetime(df_filtered["Time_Stamp"]).dt.hour
-    df_filtered["time of day"] = pd.cut(
-        df_filtered["Hour"],
-        bins=[-1, 5, 11, 17, 23],
-        labels=["Night", "Morning", "Afternoon", "Evening"],
-    )
-
-    df_filtered["month"] = (
-        pd.to_datetime(df_filtered["Time_Stamp"]).dt.to_period("M").astype(str)
-    )
-
-    points = (
-        alt.Chart(df_filtered)
-        .mark_circle(opacity=0.4, size=20)
-        .encode(
-            x=alt.X("Load", title="Load (MW)", scale=alt.Scale(zero=False)),
-            y=alt.Y("LBMP", title="Electricity price ($/MWh)"),
-            color=alt.Color("time of day:N", title="Time of Day"),
-            tooltip=["Time_Stamp", "Load", "LBMP"],
-        )
-        .facet("month:N", columns=2)
-    )
-
-    return points.properties(
-        title=f"Load vs. LBMP for {selected_zone} in the selected month"
-    )
-
-
-@st.cache_data
-def load_nyiso_geojson():
-    geojson_path = os.path.join(PROJECT_ROOT, "data", "geo", "nyiso_zones.geojson")
-    if not os.path.exists(geojson_path):
-        return None
-
-    with open(geojson_path, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-@st.cache_data
-def prepare_map_data(lbpm_load: pd.DataFrame) -> pd.DataFrame:
-    df = lbpm_load.copy()
-
-    df["Time_Stamp"] = pd.to_datetime(df["Time_Stamp"], errors="coerce")
-    df = df.dropna(subset=["Time_Stamp", "Name", "Load", "LBMP"])
-
-    df["zone_code"] = df["Name"].map(MAP_ZONE_MAP)
-    df = df.dropna(subset=["zone_code"])
-
-    df["map_date"] = df["Time_Stamp"].dt.date
-    df["map_hour"] = df["Time_Stamp"].dt.hour
-
-    grouped = df.groupby(["map_date", "map_hour", "zone_code"], as_index=False).agg(
-        avg_load=("Load", "mean"),
-        avg_lbmp=("LBMP", "mean"),
-    )
-    return grouped
-
-
-def map_interpretation(df: pd.DataFrame) -> str:
-    peak_load_zone = df.loc[df["avg_load"].idxmax()]["zone_code"]
-    peak_price_zone = df.loc[df["avg_lbmp"].idxmax()]["zone_code"]
-
-    avg_load = df["avg_load"].mean()
-    avg_price = df["avg_lbmp"].mean()
-
-    return (
-        f"The maps highlight spatial differences in both electricity demand and pricing across NYISO zones. "
-        f"At the selected time, zone {peak_load_zone} experiences the highest average load, while zone {peak_price_zone} "
-        f"records the highest electricity price.\n\n"
-        f"In general, areas with higher demand tend to exhibit higher price levels, reflecting the supply-demand "
-        f"dynamics of electricity markets. However, the relationship is not perfectly uniform across zones. "
-        f"Some zones may experience relatively high prices even without the highest load, which can be explained by "
-        f"transmission constraints, local congestion, or differences in generation mix.\n\n"
-        f"Compared with the system-wide average load of {avg_load:,.0f} MW and average price of ${avg_price:.2f}/MWh, "
-        f"the variation across zones illustrates the importance of spatial heterogeneity in electricity markets. "
-        f"This reinforces the idea that electricity pricing is highly location-dependent rather than determined by "
-        f"a single system-wide equilibrium."
-    )
-
-
-def make_zone_choropleth(
-    filtered: pd.DataFrame,
-    geojson_data: dict,
-    color_col: str,
-    title: str,
-    color_scale: str,
-    legend_title: str,
-):
-    fig = px.choropleth_mapbox(
-        filtered,
-        geojson=geojson_data,
-        locations="zone_code",
-        featureidkey="properties.Zone",
-        color=color_col,
-        color_continuous_scale=color_scale,
-        mapbox_style="carto-darkmatter",
-        center={"lat": 42.9, "lon": -75.5},
-        zoom=5.3,
-        opacity=0.72,
-        hover_name="zone_code",
-        hover_data={
-            "avg_load": ":.1f",
-            "avg_lbmp": ":.2f",
-            "zone_code": False,
-        },
-        title=title,
-    )
-
-    fig.update_layout(
-        height=520,
-        margin={"r": 0, "t": 45, "l": 0, "b": 0},
-        coloraxis_colorbar=dict(title=legend_title),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-    )
-
-    return fig
-
-
 def render_zone_map(lbpm_load: pd.DataFrame) -> None:
-    st.subheader("NYISO Zone Map")
     st.write(
         "These two maps compare average load and average LBMP across NYISO zones "
-        "for the same selected day and hour."
+        "for the same selected day and hour. Notice where the two patterns align — and where they diverge. "
     )
-    st.caption(
-        "Comparing demand (left) and price (right) reveals how spatial imbalances drive electricity pricing."
-    )
-
     geojson_data = load_nyiso_geojson()
     if geojson_data is None:
         st.warning("Map file not found: data/geo/nyiso_zones.geojson")
@@ -373,31 +343,19 @@ def render_zone_map(lbpm_load: pd.DataFrame) -> None:
         st.plotly_chart(price_fig, use_container_width=True)
 
     with st.expander("Preview zone-level map data"):
+        display_df = filtered.sort_values("avg_load", ascending=False).reset_index(
+            drop=True
+        )
+        display_df = display_df.drop(columns=["zone_code"])
+        display_df = display_df.rename(columns={"zone_label": "Zone"})
         st.dataframe(
-            filtered.sort_values("avg_load", ascending=False).reset_index(drop=True),
+            display_df,
             use_container_width=True,
         )
 
-    st.write(map_interpretation(filtered))
     st.info(
         "Key takeaway: Electricity prices are shaped not only by demand levels but by where that demand occurs within the grid."
     )
-
-
-def compute_gas_metrics(df: pd.DataFrame) -> dict[str, str]:
-    avg_price = df["price"].mean()
-    max_price = df["price"].max()
-    min_price = df["price"].min()
-
-    peak_row = df.loc[df["price"].idxmax()]
-    peak_date = peak_row["date"].strftime("%Y-%m-%d")
-
-    return {
-        "avg": f"{avg_price:.2f}",
-        "max": f"{max_price:.2f}",
-        "min": f"{min_price:.2f}",
-        "peak_date": peak_date,
-    }
 
 
 # ------ Interpretation text ------
@@ -409,92 +367,76 @@ def graph_legend() -> str:
     )
 
 
-def demand_interpretation(df: pd.DataFrame, zone: str) -> str:
-    avg_load = df["Load"].mean()
-    avg_lbmp = df["LBMP"].mean()
-    max_load = df["Load"].max()
-
-    return (
-        f"In {zone}, the average load for the selected month is {avg_load:,.0f} MW, "
-        f"with an average electricity price of ${avg_lbmp:.2f}/MWh. "
-        f"The scatter plot shows a positive relationship between demand and price — "
-        f"as load approaches its peak of {max_load:,.0f} MW, prices tend to rise and become more volatile. "
-        f"This reflects the nonlinear nature of electricity markets, where generators with higher marginal costs "
-        f"are dispatched during peak demand periods."
-    )
-
-
-def gas_interpretation(df: pd.DataFrame) -> str:
-    peak_row = df.loc[df["price"].idxmax()]
-    low_row = df.loc[df["price"].idxmin()]
-
-    peak_date = peak_row["date"].strftime("%Y-%m-%d")
-    low_date = low_row["date"].strftime("%Y-%m-%d")
-
-    return (
-        f"The Henry Hub benchmark series shows substantial volatility over time. "
-        f"In this sample, the highest observed benchmark gas price occurs on {peak_date}, "
-        f"while the lowest occurs on {low_date}. Henry Hub is used here as a national benchmark "
-        f"to provide broader fuel-market context rather than a New York-specific local gas price."
-    )
-
-
 # ------ Render sections ------
 def render_sidebar() -> None:
     st.sidebar.title("Energy Market Dashboard")
     st.sidebar.markdown(
         """
-        **This page combines**
-        - NYISO real-time electricity prices
-        - Henry Hub natural gas prices
-        - exploratory market interpretation
+        **What you'll find here**
+        - Spatial comparison of demand and price across NYISO zones
+        - Hourly load–price dynamics within a selected zone
+        - LBMP vs. Henry Hub natural gas benchmark
 
-        **Data source logic**
-        - electricity: online NYISO public data
-        - gas: Henry Hub data stored in BigQuery
+        **Data sources**
+        - NYISO real-time LBMP and actual load
+        - Henry Hub natural gas spot price (EIA)
+
+        Data is refreshed daily via an automated pipeline into BigQuery.
         """
     )
+
+    st.sidebar.divider()
+
+    reversed_period = time_period[::-1]
+    default_start_idx = (
+        reversed_period.index(one_month_ago) if one_month_ago in reversed_period else 0
+    )
+
+    st.sidebar.subheader("Select Period")
+    start_month = st.sidebar.selectbox(
+        "Start Month", options=reversed_period, index=default_start_idx
+    )
+    end_month = st.sidebar.selectbox("End Month", options=reversed_period, index=0)
+
+    return start_month, end_month
 
 
 def render_intro() -> None:
-    st.title("🏬 NYC Electricity Prices and Natural Gas Context")
+    st.title("🏬 NY State Electricity Prices vs Demand and Supply")
     st.write(
         """
-        This page combines two related parts of our project: NYISO real-time electricity prices and
-        Henry Hub natural gas prices stored in BigQuery. The goal is to present a more coherent energy-market
-        view by showing both local electricity price outcomes and broader benchmark fuel-market conditions.
+        This page combines two key datasets to explore the dynamics of electricity prices in New York State:
+        1. NYISO real-time electricity prices (LBMP) and load data, which provide granular insights into how prices fluctuate in response to demand and supply conditions across different zones and times.
+        2. Henry Hub natural gas prices, which serve as a benchmark for fuel costs that often influence electricity prices, especially in a gas-heavy generation mix like New York's.
         """
     )
-    st.divider()
 
 
 def render_demand_section(month: int) -> None:
     st.header("Electricity Price vs. Load")
-    st.write("""        
-        This section explores the relationship between electricity prices and demand (load) in the selected NYISO zone and month. 
-        How does the price change as load increases? Are there certain times of day when prices are more volatile? 
-        """)
 
-    with st.spinner("Loading demand data..."):
+    with st.spinner("Loading data from BigQuery(this may take a moment)..."):
         LBMP_load = merge_load_and_lbmp(month)
 
-    st.subheader("Spatial Distribution Across NYISO Zones")
+    st.subheader("Spatial Distribution Across NYISO Zones: NYISO Zone Map")
 
     render_zone_map(LBMP_load)
 
+    st.subheader("Demand-Price Relationship Within a Zone")
+    st.write(
+        "Zoom into a single zone to see how hourly load and price relate within the selected month."
+    )
+
     selected_zone = st.selectbox(
         "Select a NYISO zone",
-        options=list(ZONE_MAP.keys()),
-        format_func=lambda x: ZONE_MAP.get(x),
-        index=list(ZONE_MAP.keys()).index("N.Y.C."),
+        options=list(ZONE_INFO.keys()),
+        format_func=lambda x: ZONE_INFO[x]["label"],
+        index=list(ZONE_INFO.keys()).index("N.Y.C."),
         key="demand_zone_select",
     )
 
-    chart = create_demand_chart(LBMP_load, selected_zone)
+    chart = create_demand_scatter_plot(LBMP_load, selected_zone)
     st.altair_chart(chart, use_container_width=True)
-
-    st.write("**Interpretation**")
-    st.write(demand_interpretation(LBMP_load, selected_zone))
 
     st.divider()
 
@@ -504,19 +446,23 @@ def render_electricity_section(month: int) -> None:
 
     st.write(
         """
-        This section explores the relationship between NYISO real-time electricity prices and Henry Hub natural gas prices. Select a zone to examine
-        how locational marginal prices vary over the available monthly sample.
+        NYISO real-time prices capture local power-market outcomes, while Henry Hub provides a benchmark
+        fuel-market signal. Looking at both together helps us place electricity price volatility in a broader
+        energy-market context — though this comparison is exploratory rather than a direct causal estimate.
+
+        Select a zone to examine how its locational marginal prices move alongside the Henry Hub benchmark
+        over the available monthly sample.
         """
     )
 
     # input month and zone
     try:
-        realtime_df = load_nyiso_realtime(month)
+        realtime_df = load_lbmp(month)
         selected_zone = st.selectbox(
             "Select a NYISO zone",
-            options=list(ZONE_MAP.keys()),
-            format_func=lambda x: ZONE_MAP.get(x),
-            index=list(ZONE_MAP.keys()).index("N.Y.C."),
+            options=list(ZONE_INFO.keys()),
+            format_func=lambda x: ZONE_INFO[x]["label"],
+            index=list(ZONE_INFO.keys()).index("N.Y.C."),
             key="comparison_zone_select",
         )
 
@@ -528,14 +474,14 @@ def render_electricity_section(month: int) -> None:
         chart = create_comparison_graph(zone_df, filtered)
         st.altair_chart(chart, use_container_width=True)
 
+        if zone_df.empty:
+            st.warning("No electricity data available for the selected zone.")
+            return
+
     except Exception as exc:
         st.error(
             f"Failed to load NYISO electricity data from online public source: {exc}"
         )
-        return
-
-    if zone_df.empty:
-        st.warning("No electricity data available for the selected zone.")
         return
 
     col1, col2 = st.columns(2)
@@ -549,113 +495,16 @@ def render_electricity_section(month: int) -> None:
     with st.expander("Preview processed electricity data"):
         st.dataframe(zone_df.head(30), use_container_width=True)
 
-    st.divider()
-
-
-def render_gas_section(gas_df: pd.DataFrame) -> None:
-    st.header("Natural Gas Benchmark Context")
-
-    st.write(
-        """
-        This section uses Henry Hub daily prices loaded from BigQuery. Henry Hub is treated here as a benchmark
-        U.S. natural gas series, which provides fuel-market context for interpreting electricity price movements.
-        """
+    st.info(
+        "Key idea: electricity prices show local short-run market outcomes, "
+        "while Henry Hub shows broader benchmark fuel conditions. "
     )
-
-    min_date = gas_df["date"].min().date()
-    max_date = gas_df["date"].max().date()
-
-    selected_range = st.date_input(
-        "Select gas date range",
-        value=(min_date, max_date),
-        min_value=min_date,
-        max_value=max_date,
-    )
-
-    if isinstance(selected_range, tuple) and len(selected_range) == 2:
-        start_date, end_date = selected_range
-    else:
-        start_date, end_date = min_date, max_date
-
-    filtered = gas_df[
-        (gas_df["date"].dt.date >= start_date) & (gas_df["date"].dt.date <= end_date)
-    ].copy()
-
-    if filtered.empty:
-        st.warning("No gas data available for the selected date range.")
-        return
-
-    metrics = compute_gas_metrics(filtered)
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Average Gas Price", metrics["avg"])
-    c2.metric("Maximum Gas Price", metrics["max"])
-    c3.metric("Minimum Gas Price", metrics["min"])
-    c4.metric("Peak Date", metrics["peak_date"])
-
-    chart_df = filtered.set_index("date")[["price"]]
-    st.line_chart(chart_df, use_container_width=True)
-
-    st.caption(
-        "Henry Hub price is a benchmark U.S. natural gas series loaded from BigQuery."
-    )
-
-    st.write("**Interpretation**")
-    st.write(gas_interpretation(filtered))
-
-    with st.expander("Preview processed gas data"):
-        st.dataframe(filtered.head(30), use_container_width=True)
-
-    st.divider()
-
-
-def render_gas_unavailable(exc: Exception) -> None:
-    st.header("Natural Gas Benchmark Context")
-    st.warning(
-        "Henry Hub gas data could not be loaded from BigQuery in the current runtime environment. "
-        "Electricity content is still available below the intro section."
-    )
-    st.code(str(exc))
-
-
-def render_comparison_section(gas_available: bool) -> None:
-    st.header("Why Compare These Two Series?")
-
-    if gas_available:
-        st.write(
-            """
-            NYISO real-time prices capture local power-market outcomes, while Henry Hub provides a benchmark
-            fuel-market signal. Looking at both together helps us place electricity price volatility in a broader
-            energy-market context. This comparison is exploratory and interpretive rather than a direct causal estimate.
-            """
-        )
-        st.info(
-            "Key idea: electricity prices show local short-run market outcomes, while Henry Hub shows broader benchmark fuel conditions."
-        )
-    else:
-        st.write(
-            """
-            NYISO real-time prices capture local power-market outcomes. Henry Hub is intended to provide broader
-            benchmark fuel-market context, but it is unavailable in the current runtime because the BigQuery query
-            failed or credentials were not configured correctly.
-            """
-        )
 
 
 # ------ Main ------
 def main() -> None:
-    render_sidebar()
+    start_month, end_month = render_sidebar()
     render_intro()
-
-    col_start, col_end = st.columns(2)
-    with col_start:
-        start_month = st.select_slider(
-            "Start Month", options=time_period[::-1], value=one_month_ago
-        )
-    with col_end:
-        end_month = st.select_slider(
-            "End Month", options=time_period[::-1], value=latest_month
-        )
 
     start_idx = time_period.index(start_month)
     end_idx = time_period.index(end_month)
@@ -674,8 +523,6 @@ def main() -> None:
     render_demand_section(month)
 
     render_electricity_section(month)
-
-    render_comparison_section(gas_available=True)
 
 
 if __name__ == "__main__":
