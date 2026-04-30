@@ -42,6 +42,7 @@ ZONE_INFO = {
 }
 
 today = datetime.date.today()
+yesterday = today - datetime.timedelta(days=1)
 latest_month = today.strftime("%Y-%m")
 time_period = (
     pd.date_range(start="2017-01", end=latest_month, freq="MS")
@@ -292,10 +293,15 @@ def render_zone_map(lbpm_load: pd.DataFrame) -> None:
 
     available_dates = sorted(map_df["map_date"].unique())
 
+    if yesterday in available_dates:
+        default_idx = available_dates.index(yesterday)
+    else:
+        default_idx = len(available_dates) - 1
+
     selected_date = col1.selectbox(
         "Select date for maps",
         available_dates,
-        index=len(available_dates) - 1,
+        index=default_idx,
         key="map_date_select",
     )
 
